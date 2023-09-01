@@ -371,12 +371,18 @@ let Matsui = (() => {
 			}
 		}
 	}
+	let templateCacheSymbol = Symbol("template");
 	let templateFromElement = element => {
+		if (element[templateCacheSymbol]) return element;
+		
 		let cloneable = element.content || element;
-		let setupFunctions = [];
-		scanElementTemplate(cloneable, setupFunctions, [], []);
+		let setupFunctions;
 
 		let result = innerTemplate => {
+			if (!setupFunctions) { // Lazy parsing
+				scanElementTemplate(cloneable, setupFunctions = [], [], []);
+			}
+
 			let node = cloneable.cloneNode(true);
 			let updates = [];
 			setupFunctions.forEach(fn => {
@@ -387,13 +393,15 @@ let Matsui = (() => {
 		};
 		let filterExpr = element.getAttribute && element.getAttribute("@filter");
 		result.filter = new Function('state', 'return ' + (filterExpr || 'true'));
-		return result;
+		if (element.id) result.id = element.id;
+		return element[templateCacheSymbol] = result;
 	};
-	function templateFromHtml(html) {
+	function templateFromHtmlDefault(html) {
 		let template = document.createElement("template");
 		template.innerHTML = html;
 		return templateFromElement(template);
 	}
+	let templateFromHtml = templateFromHtmlDefault;
 
 	function makeMergeValue(fromValue, toValue) {
 		if (!isObject(toValue) || !isObject(fromValue)) return toValue;
@@ -470,82 +478,37 @@ let Matsui = (() => {
 			}
 		});
 	}
-
-	function Mergeable(host, data, updateFn, template) {
+	
+	let mergeTracker = (data, updateFn, immediate) => {
 		let pendingMerge = null, pendingMergeTimeout = null;
 		let notifyPendingMerge = () => {
 			clearTimeout(pendingMergeTimeout);
 			if (pendingMerge) {
-				if (updateFn) updateFn(pendingMerge);
-				this.notifyMerged(pendingMerge);
+				updateFn(pendingMerge);
 				pendingMerge = null;
 			}
 		}
-		let makeMonitored = data => {
-			// Assembles a JSON Patch Merge for any observed changes, and calls .notifyMerged()
-			return mergeNotificationObject(data, (mergeObj, keyPath) => {
-				for (let i = keyPath.length - 1; i >= 0; --i) {
-					let key = keyPath[i];
-					mergeObj = {[key]: mergeObj};
-				}
-				
-				if (pendingMerge) { // collect multiple changes together
-					pendingMerge = applyMerge(pendingMerge, mergeObj);
-				} else {
-					pendingMerge = mergeObj;
-					requestAnimationFrame(notifyPendingMerge);
-					pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
-				}
-			}, []);
-		}
-		let monitored = makeMonitored(data);
-
-		let endNode = document.createTextNode("");
-		host.append(endNode);
-		let bind = new SingleValueBind(endNode, template, template);
-		bind.update(monitored);
-
-		this.notifyMerged = mergeObj => {
-			let withHiddenMerge = addHiddenMerge(monitored, mergeObj);
-			bind.update(withHiddenMerge);
-		};
-
-		this.merge = mergeObj => {
-			let newData = applyMerge(data, mergeObj);
-			if (newData != data) {
-				data = newData;
-				monitored = makeMonitored(data);
+		// Assembles a JSON Patch Merge for any observed changes, and calls .notifyMerged()
+		return mergeNotificationObject(data, (mergeObj, keyPath) => {
+			for (let i = keyPath.length - 1; i >= 0; --i) {
+				let key = keyPath[i];
+				mergeObj = {[key]: mergeObj};
 			}
-			this.notifyMerged(mergeObj);
-		};
-		
-		this.replace = newData => {
-			let mergeValue = makeMergeValue(data, newData);
-			data = newData;
-			monitored = makeMonitored(data);
-			this.notifyMerged(mergeValue);
-		};
-	}
-	
-	let templateCacheSymbol = Symbol("template");
-	function collectElementTemplates(element) {
-		let templateList = [];
-		element.querySelectorAll('template').forEach(template => {
-			let t = template[templateCacheSymbol]; // we have to cache it because the parse messes with the tree
-			if (!t) {
-				t = templateFromElement(template, template.content);
-				if (template.id) t.id = template.id;
-				template[templateCacheSymbol] = t;
+			
+			if (immediate) {
+				updateFn(mergeObj);
+			} else if (pendingMerge) { // collect multiple changes together
+				pendingMerge = applyMerge(pendingMerge, mergeObj);
+			} else {
+				pendingMerge = mergeObj;
+				requestAnimationFrame(notifyPendingMerge);
+				pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
 			}
-			templateList.push(t);
-		});
-		return templateList;
-	}
+		}, []);
+	};
 
 	let fallbackTemplate = templateFromHtml(`<template @filter="Array.isArray(state)"><details><summary>[{{=a=>a.length}} items]</summary><ol><li @items="(k,v)=>[v]">{{0}}</li></ol></details></template><template><details @items="(k,v)=>[k,v]" style="width:100%;box-sizing:border-box;font-size:0.8rem;line-height:1.2"><summary style="opacity:0.75;font-style:italic;cursor:pointer">{{0}}</summary><div style="margin-inline-start:2em;margin-inline-start:calc(min(4em,10%))">{{1}}</div></details></template>{{=}}`);
-	function templateFromList(list, fallback) {
-		if (!fallback) fallback = fallbackTemplate;
-		
+	function templateFromList(list) {
 		return innerTemplate => {
 			let node = document.createDocumentFragment();
 			let endNode = document.createTextNode("");
@@ -561,7 +524,7 @@ let Matsui = (() => {
 					}
 				}
 				// Find a new template
-				currentTemplate = fallback;
+				currentTemplate = fallbackTemplate;
 				for (let i = 0; i < list.length; ++i) {
 					let template = list[i];
 					if (!template.filter || template.filter(data)) {
@@ -577,14 +540,100 @@ let Matsui = (() => {
 		}
 	}
 
+	function TrackedDisplay(host, data, template) {
+		let endNode = document.createTextNode("");
+		host.append(endNode);
+		let bind = new SingleValueBind(endNode, template, template);
+
+		let updateFunctions = [];
+		let updateAndNotify = mergeObj => {
+			updateFunctions.forEach(fn => fn(mergeObj));
+		};
+		this.track = fn => {
+			updateFunctions.push(fn);
+			return this;
+		};
+
+		let tracked = mergeTracker(data, updateAndNotify);
+		bind.update(tracked);
+		
+		// If you have already changed `data`, but want to tell us about it
+		let notifyMerged = this.notifyMerged = mergeObj => {
+			let withHiddenMerge = addHiddenMerge(tracked, mergeObj);
+			bind.update(withHiddenMerge);
+		};
+		updateFunctions.push(notifyMerged);
+
+		this.merge = mergeObj => {
+			let newData = applyMerge(data, mergeObj);
+			if (newData != data) {
+				data = newData;
+				tracked = mergeTracker(data, updateAndNotify);
+			}
+			notifyMerged(mergeObj);
+		};
+		
+		this.replace = newData => {
+			let mergeValue = makeMergeValue(data, newData);
+			data = newData;
+			tracked = mergeTracker(data, updateAndNotify);
+			bind.update(null); // clears everything out
+			notifyMerged(mergeValue);
+		};
+	}
+	
 	let api = {
-		templates: element => {
-			if (typeof element == 'string') element = document.querySelector(element);
-			return templateFromList(collectElementTemplates(element));
+		merge: {
+			track(data, updateFn, immediate) {
+				return mergeTracker(data, updateFn, immediate);
+			},
+			make(fromData, toData) {
+				makeMergeValue(fromData, toData);
+			},
+			apply(toData, mergeValue) {
+				return applyMerge(toData, mergeValue); // might return a different object
+			}
 		},
-		fill: (element, data, updateFn, template) => {
-			if (typeof template != 'function') template = api.templates(template || document);
-			return new Mergeable(element, data, updateFn, template);
+		template: {
+			// If the templates have an extra `.filter()` function, they can decline to render the data.  This uses the first template which accepts the data (or has no `.filter()`).
+			fromList(list) {
+				return templateFromList(list);
+			},
+
+			// HTML templates
+			fromHtml(html) {
+				return templateFromHtml(html);
+			},
+			fromElement(element) {
+				return templateFromElement(element);
+			},
+			fromElements: nodeListOrQuery => {
+				if (typeof nodeListOrQuery == 'string') nodeListOrQuery = document.querySelectorAll(nodeListOrQuery);
+				let list = [];
+				nodeListOrQuery.forEach(element => list.push(templateFromElement(element)));
+				return templateFromList(list);
+			},
+			// Define your own HTML template format, from either HTML or DOM nodes (which might not be templates!)
+			setHtmlFormat(fromHtml, fromElement) {
+				templateFromHtml = fromHtml || templateFromHtmlDefault;
+				templateFromElement = fromElement || (element => {
+					let t = document.createElement('template');
+					t.content.appendChild(element);
+					return templateFromHtml(t.innerHTML);
+				});
+			},
+			
+			bind(endNode, template, innerTemplate) {
+				return new SingleValueBind(endNode, template, innerTemplate || template);
+			},
+			bindComposite(itemFunction, endNode, template, innerTemplate) {
+				return new CompositeValueBind(itemFunction, endNode, template, innerTemplate || template);
+			}
+		},
+		
+		show: (element, data, template, updateFn) => {
+			if (typeof template != 'function') template = api.template.fromElements(template || 'template');
+			return new TrackedDisplay(element, data, template, updateFn);
 		}
 	}
 	return api;
