@@ -12,8 +12,11 @@ let Matsui = (() => {
 				}
 				leafAccessFn(subPath);
 				return value;
+			},
+			ownKeys(obj) { // We're being asked to list our keys - assume this means they're interested in the whole object (including key addition and deletion)
+				leafAccessFn(keyPath);
+				return Reflect.ownKeys(obj);
 			}
-			// TODO: track key enumeration, so we can update
 		});
 		accessTrackingMap.set(proxy, {data: data, accessFn: leafAccessFn, keyPath: keyPath});
 		return proxy;
@@ -28,25 +31,83 @@ let Matsui = (() => {
 	}
 
 	let hiddenMergeMap = new WeakMap();
+	let noChangeSymbol = Symbol("no change");
 	function addHiddenMerge(data, mergeObj) {
 		if (!isObject(data)) return data;
-		if (!mergeObj) mergeObj = {};
 		let proxy = new Proxy(data, {
 			get(obj, prop) {
 				let value = Reflect.get(...arguments);
-				return addHiddenMerge(value, mergeObj[prop]);
+				return addHiddenMerge(value, mergeObj ? mergeObj[prop] : noChangeSymbol);
 			}
 		});
 		hiddenMergeMap.set(proxy, mergeObj);
 		return proxy;
 	}
 	function getHiddenMerge(data) {
-		return hiddenMergeMap.get(data) || data;
+		return hiddenMergeMap.get(data);
 	}
 
-	// These binds don't initially fill themselves, because that would mess with the childNode indexing during template setup
-	function BasicValueBind(endNode, template, innerTemplate) { // TODO: rename to SingleValueBind?
-		let currentTemplateBinding;
+	let updateTriggerSetKey = Symbol('updateFunctions');
+	function combineUpdatesWithTracking(updateFunctions) {
+		let currentUpdateIndex = null;
+		let updateTriggers;
+		// Whenever a property in our data tree is accessed during a render update, we stick that update in a parallel tree structure
+		let makeTracked = data => {
+			if (!isObject(data)) return data;
+			return trackAccess(data, keyPath => {
+				if (currentUpdateIndex == null) throw Error("Huh?");
+				let o = updateTriggers;
+				keyPath.forEach(k => {
+					if (!Object.hasOwn(o, k)) o[k] = {};
+					o = o[k];
+				});
+
+				// Add the current update identifier to the trigger map
+				if (!o[updateTriggerSetKey]) o[updateTriggerSetKey] = new Set();
+				o[updateTriggerSetKey].add(currentUpdateIndex);
+			}, []);
+		}
+
+		return data => {
+			let tracked = makeTracked(data);
+
+			if (!updateTriggers) { // first run - set up the trigger map and run all the updates
+				updateTriggers = {};
+				updateFunctions.forEach((fn, index) => {
+					currentUpdateIndex = index;
+					fn(tracked);
+				});
+				currentUpdateIndex = null;
+				return;
+			}
+
+			let mergeValue = getHiddenMerge(data);
+			
+			let updateSet = new Set();
+			function addUpdates(merge, triggers) {
+				if (merge == noChangeSymbol) return;
+				let updates = triggers[updateTriggerSetKey];
+				if (updates) {
+					updates.forEach(index => updateSet.add(index));
+					updates.clear();
+				}
+				if (!isObject(merge)) return;
+				Object.keys(merge).forEach(key => {
+					if (Object.hasOwn(triggers, key)) addUpdates(merge[key], triggers[key]);
+				});
+			}
+			addUpdates(mergeValue, updateTriggers);
+			
+			updateSet.forEach(index => { // TODO: sort this, so that they're always run in the order provided, which would let us eagerly check template compatibility but only sometimes
+				currentUpdateIndex = index;
+				updateFunctions[index](tracked);
+			});
+			currentUpdateIndex = null;
+		};
+	}
+	
+	function SingleValueBind(endNode, template, innerTemplate) {
+		let currentTemplateUpdate;
 
 		let textNode;
 		let prevNode = endNode.previousSibling;
@@ -55,7 +116,7 @@ let Matsui = (() => {
 				textNode.remove();
 				textNode = null;
 			}
-			currentTemplateBinding = null;
+			currentTemplateUpdate = null;
 			while (endNode.previousSibling && endNode.previousSibling != prevNode) {
 				endNode.previousSibling.remove();
 			}
@@ -65,15 +126,15 @@ let Matsui = (() => {
 			if (isObject(data)) {
 				let untracked = getUntracked(data); // if this is being called from inside a DataTemplateBinding, terminate the access tracking here
 
-				if (!currentTemplateBinding) {
+				if (!currentTemplateUpdate) {
 					clear();
 
 					let bindingInfo = template(innerTemplate);
-					currentTemplateBinding = new DataTemplateBinding(bindingInfo.updates);
-					currentTemplateBinding.update(untracked);
+					currentTemplateUpdate = combineUpdatesWithTracking(bindingInfo.updates);
+					currentTemplateUpdate(untracked);
 					endNode.before(bindingInfo.node);
 				} else {
-					currentTemplateBinding.update(untracked);
+					currentTemplateUpdate(untracked);
 				}
 			} else {
 				if (!textNode) {
@@ -114,6 +175,9 @@ let Matsui = (() => {
 		this.update = data => {
 			let untracked = getUntracked(data); // terminate any access tracking here (so we get notified for everything)
 			let mergeValue = getHiddenMerge(untracked); // and do our own filtering based on what's actually changed
+			// If the data is a non-null object or array, the merge must either be one too, or there's no change
+			if (mergeValue == noChangeSymbol) return;
+			
 			if (Array.isArray(untracked)) {
 				if (objectBinds) clear();
 				if (!arrayBinds) arrayBinds = [];
@@ -133,7 +197,7 @@ let Matsui = (() => {
 
 					let index = arrayBinds.length;
 					let item = itemFn(index, untracked[index]);
-					let bind = new BasicValueBind(itemEndNode, template, innerTemplate);
+					let bind = new SingleValueBind(itemEndNode, template, innerTemplate);
 					arrayBinds.push(bind);
 					bind.update(item);
 				}
@@ -152,7 +216,7 @@ let Matsui = (() => {
 					if (!Object.hasOwn(objectBinds, key)) {
 						let itemEndNode = document.createTextNode("");
 						endNode.before(itemEndNode);
-						objectBinds[key] = new BasicValueBind(itemEndNode, template, innerTemplate);
+						objectBinds[key] = new SingleValueBind(itemEndNode, template, innerTemplate);
 						let item = itemFn(key, data[key]);
 						objectBinds[key].update(item);
 					} else if (Object.hasOwn(mergeValue, key)) {
@@ -167,54 +231,6 @@ let Matsui = (() => {
 		this.remove = () => {
 			clear();
 			endNode.remove();
-		};
-	}
-
-	let updateTriggerSetKey = Symbol('updateFunctions');
-	function DataTemplateBinding(updateFunctions) { // TODO: move to above the SimpleDataBind, maybe add second argument and run immediately?  Or rename to "combineIntoMonitoringUpdate" or whatever
-		let currentUpdateIndex = null;
-		let updateTriggers = {};
-		updateTriggers[updateTriggerSetKey] = new Set(updateFunctions.map((f, i) => i));
-		// Whenever a property in our data tree is accessed during a render update, we stick that update in a parallel tree structure
-		let makeTracked = data => {
-			if (!isObject(data)) return data;
-			return trackAccess(data, keyPath => {
-				if (currentUpdateIndex == null) throw Error("Huh?");
-				let o = updateTriggers;
-				keyPath.forEach(k => {
-					if (!Object.hasOwn(o, k)) o[k] = {};
-					o = o[k];
-				});
-
-				// Add the current update identifier to the trigger map
-				if (!o[updateTriggerSetKey]) o[updateTriggerSetKey] = new Set();
-				o[updateTriggerSetKey].add(currentUpdateIndex);
-			}, []);
-		}
-
-		this.update = data => {
-			let mergeValue = getHiddenMerge(data);
-			
-			let updateSet = new Set();
-			function addUpdates(merge, triggers) {
-				let updates = triggers[updateTriggerSetKey];
-				if (updates) {
-					updates.forEach(index => updateSet.add(index));
-					updates.clear();
-				}
-				if (!isObject(merge)) return;
-				Object.keys(merge).forEach(key => {
-					if (Object.hasOwn(triggers, key)) addUpdates(merge[key], triggers[key]);
-				});
-			}
-			addUpdates(mergeValue, updateTriggers);
-			
-			let tracked = makeTracked(data);
-			updateSet.forEach(index => { // TODO: sort this, so that they're always run in the order provided, which would let us eagerly check template compatibility but only sometimes
-				currentUpdateIndex = index;
-				updateFunctions[index](tracked);
-			});
-			currentUpdateIndex = null;
 		};
 	}
 
@@ -345,7 +361,7 @@ let Matsui = (() => {
 							let endNode = templateRoot;
 							endNodePath.forEach(i => endNode = endNode.childNodes[i]);
 							endNode.nodeValue = suffix;
-							let bind = new BasicValueBind(endNode, scopedTemplate, innerTemplate);
+							let bind = new SingleValueBind(endNode, scopedTemplate, innerTemplate);
 							return data => bind.update(valueFn(data));
 						});
 					}
@@ -486,7 +502,7 @@ let Matsui = (() => {
 
 		let endNode = document.createTextNode("");
 		host.append(endNode);
-		let bind = new BasicValueBind(endNode, template, template);
+		let bind = new SingleValueBind(endNode, template, template);
 		bind.update(monitored);
 
 		this.notifyMerged = mergeObj => {
@@ -536,7 +552,7 @@ let Matsui = (() => {
 			node.append(endNode);
 			
 			let currentTemplate
-			let valueBinding = new BasicValueBind(endNode, fallbackTemplate, innerTemplate);
+			let valueBinding = new SingleValueBind(endNode, fallbackTemplate, innerTemplate);
 			
 			function update(data) {
 				if (currentTemplate) {
