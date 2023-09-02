@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Matsui tests</title>
+		<style>
+			body {
+				font-family: sans-serif;
+				padding: 0;
+				margin: 0;
+			}
+		
+			#message-container {
+				width: 100%;
+				height: 2em;
+				border: 1px solid #888;
+				position: relative;
+			}
+			
+			#iframe-runner, #message {
+				position: absolute;
+				top: 0;
+				left: 0;
+				height: 100%;
+				width: 100%;
+				text-align: center;
+				border: none;
+				line-height: 1;
+				padding: 0.5em;
+				background-color: #EEE;
+				color: #666;
+				box-sizing: border-box;
+			}
+
+			.suites, .tests {
+				border-spacing: 0;
+			}
+			.suites th {
+				background: #006;
+				color: #FFF;
+			}
+			.suites td {
+				padding: 0;
+			}
+			.suites th, .suites .header td, .tests td {
+				padding: 0.3em 0.5em;
+			}
+			.tests th {
+				background: #DEF;
+				color: #000;
+			}
+			.suite .header {
+				display: flex;
+				flex-direction: row;
+			}
+			.suite .header .name
+		</style>
+	</head>
+	<body>
+		<template id="test-runner-template">
+			<div id="message-container">
+				<iframe id="iframe-runner"></iframe>
+				<div id="message">{{message}}</div>
+			</div>
+			
+			<template>
+				<template>
+					<tr class="header">
+						<th>{{name}}</th>
+						<td>{{=> data.tests.length}} items</td>
+					</tr>
+					<tr class="test-list">
+						<td></td>
+						<td>
+							<template>
+								<template>
+									{{name}}: {{status}} : {{message}}
+								</template>
+
+								<table class="tests">
+									<tr @items>
+										<th>{{name}}</th>
+										<td>{{=> data.status.iframe}}</td>
+										<td>{{message}}</td>
+									</tr>
+								</table>
+							</template>
+							{{tests}}
+						</td>
+					</div>
+				</template>
+				<table class="suites">
+					<script @items>value</script>
+				</table>
+			</template>
+			{{suites}}
+		</template>
+		
+		<script src="../matsui.js"></script>
+		<script>
+			let api = Matsui;
+			let suiteKeys = ['basic'];
+
+			let renderData = {message: 'loading...'};
+
+			let scriptMap = new WeakMap();
+			function Suite(name) {
+				this.name = name;
+				this.tests = [];
+
+				this.waiting = 0;
+				this.passes = 0;
+				this.failures = 0;
+
+				this.load = (onload) => {
+					let script = document.createElement('script');
+					script.src = name + ".js";
+					script.onerror = e => fail(e.message);
+					script.onload = onload;
+					document.body.append(script);
+					
+					scriptMap.set(script, this);
+				};
+			}
+			function Test(name, runFn) {
+				if (!(this instanceof Test)) return new Test(name, runFn);
+				
+				this.name = name;
+				this.status = {iframe: "waiting"};
+				this.message = "";
+				this.run = (pass, fail) => {
+					let timeout = setTimeout(() => fail("timeout"), 500);
+					runFn(api, (p, m) => {
+						clearTimeout(timeout);
+						pass(p, m);
+					}, (m) => {
+						clearTimeout(timeout);
+						fail(m);
+					});
+				};
+				
+				let suite = scriptMap.get(document.currentScript);
+				suite.tests.push(this);
+			}
+
+			function fail(message) {
+				if (window.parent != window) {
+					window.parent.postMessage({fail: message}, '*');
+				} else {
+					console.error(renderData.message = message);
+				}
+			}
+			addEventListener('error', e => fail(e.message));
+			function done() {
+				console.log(renderData.message = "done");
+			}
+			
+			if (window.parent != window) {
+				window.onmessage = event => {
+					let data = event.data;
+					let suite = new Suite(data.suite);
+					suite.load(e => {
+						suite.tests[data.test].run((didPass, message) => {
+							if (didPass === false) return fail(message);
+							window.parent.postMessage({pass: message || didPass}, '*');
+						}, failMessage => {
+							console.log("failed, sending", failMessage);
+							fail(failMessage);
+						});
+					});
+				};
+				window.parent.postMessage({ready: 'iframe'}, '*');
+			} else {
+				let suites = suiteKeys.map(key => new Suite(key));
+				let template = Matsui.template.fromElement(document.querySelector('#test-runner-template'));
+
+				document.body.innerHTML = '';
+				let render = Matsui.show(document.body, renderData, template);
+				renderData = render.data();
+				
+				let iframeRunner = document.getElementById('iframe-runner');
+			
+				let currentSuiteIndex = 0, currentTestIndex = 0;
+				function runNextTest() {
+					let suite = suites[currentSuiteIndex];
+					while (suite && currentTestIndex >= suite.tests.length) {
+						suite = suites[++currentSuiteIndex];
+					}
+					
+					if (!suite) return done();
+					
+					iframeRunner.src = location.href;
+				}
+			
+				window.onmessage = event => {
+					let suite = suites[currentSuiteIndex];
+					let test = suite && suite.tests[currentTestIndex];
+
+					let data = event.data;
+					if (data.ready == 'iframe') {
+						test.status.iframe = "running";
+						iframeRunner.contentWindow.postMessage({suite: suite.name, test: currentTestIndex}, '*');
+					} else if (data.fail) {
+						test.status.iframe = "failed";
+						test.message = data.fail;
+						fail(data.fail);
+					} else if (data.pass) {
+						test.status.iframe = "passed";
+
+						++currentTestIndex;
+						runNextTest();
+					}
+				};
+
+				let suitesLoaded = 0;
+				suites.forEach(suite => {
+					suite.load(onload => {
+						if (++suitesLoaded == suites.length) {
+							console.log(renderData.message = "all suites loaded");
+
+							renderData.suites = suites;
+							suites = renderData.suites; // gets a wrapped/monitored version
+
+							runNextTest();
+						}
+					});
+				});
+			}
+		</script>
+	</body>
+</html>

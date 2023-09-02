@@ -1,37 +1,105 @@
 let Matsui = (() => {
 	let isObject = data => (data && typeof data === 'object');
 
-	let accessTrackingMap = new WeakMap();
-	function trackAccess(data, leafAccessFn, keyPath) {
-		let proxy = new Proxy(data, {
-			get(obj, prop) {
-				let value = Reflect.get(...arguments);
-				let subPath = keyPath.concat(prop);
-				if (isObject(value)) {
-					return trackAccess(value, leafAccessFn, subPath);
-				}
-				leafAccessFn(subPath);
-				return value;
-			},
-			ownKeys(obj) { // We're being asked to list our keys - assume this means they're interested in the whole object (including key addition and deletion)
-				leafAccessFn(keyPath);
-				return Reflect.ownKeys(obj);
-			}
-		});
-		accessTrackingMap.set(proxy, {data: data, accessFn: leafAccessFn, keyPath: keyPath});
-		return proxy;
-	}
-	function getUntracked(data) {
-		let entry = accessTrackingMap.get(data);
-		if (entry) {
-			entry.accessFn(entry.keyPath);
-			return entry.data;
-		}
-		return data;
-	}
+	/*--- JSON Patch Merge stuff ---*/
 
+	let merge = {
+		apply(value, mergeValue) {
+			// simple types are just overwritten
+			if (!isObject(value) || !isObject(mergeValue)) return mergeValue;
+			// Arrays overwrite everything
+			if (Array.isArray(mergeValue)) return mergeValue;
+
+			// They're both objects: mergey-merge
+			Object.keys(mergeValue).forEach(key => {
+				let childMerge = mergeValue[key];
+				if (Object.hasOwn(value, key)) {
+					if (childMerge == null) {
+						delete value[key];
+						return;
+					}
+					value[key] = merge.apply(value[key], childMerge);
+				} else if (childMerge != null) {
+					value[key] = childMerge;
+				}
+			});
+			return value;
+		},
+		make(fromValue, toValue) {
+			if (!isObject(toValue) || !isObject(fromValue)) return toValue;
+			if (Array.isArray(toValue)) return toValue;
+
+			let obj = {};
+			Object.keys(toValue).forEach(key => {
+				if (Object.hasOwn(fromValue, key)) {
+					obj[key] = merge.make(fromValue[key], toValue[key]);
+				} else {
+					obj[key] = toValue[key];
+				}
+			});
+			Object.keys(fromValue).forEach(key => {
+				if (!Object.hasOwn(toValue, key)) {
+					obj[key] = null;
+				}
+			});
+			return obj;
+		},
+		watch(data, updateFn) {
+			if (!isObject(data)) return data;
+			return new Proxy(data, {
+				get(obj, prop) {
+					let value = Reflect.get(...arguments);
+					if (!isObject(value)) return value;
+					return merge.watch(
+						value,
+						mergeObj => updateFn({[prop]: mergeObj})
+					);
+				},
+				set(obj, prop, value, proxy) {
+					if (value == null) return Reflect.deleteProperty(proxy, prop);
+					let oldValue = Reflect.get(obj, prop);
+					if (Reflect.set(obj, prop, value)) {
+						updateFn({[prop]: value});
+						return true;
+					}
+					return false;
+				},
+				deleteProperty(obj, prop) {
+					if (Reflect.deleteProperty(obj, prop)) {
+						updateFn({[prop]: null});
+						return true;
+					}
+					return false;
+				}
+			});
+		},
+		// collects multiple changes together
+		watchAsync(data, updateFn) {
+			let pendingMerge = null, pendingMergeTimeout = null;
+			let notifyPendingMerge = () => {
+				clearTimeout(pendingMergeTimeout);
+				if (pendingMerge) {
+					updateFn(pendingMerge);
+					pendingMerge = null;
+				}
+			}
+			return merge.watch(data, mergeObj => {
+				if (pendingMerge) {
+					pendingMerge = merge.apply(pendingMerge, mergeObj);
+				} else {
+					pendingMerge = mergeObj;
+					requestAnimationFrame(notifyPendingMerge);
+					pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
+				}
+			});
+		}
+	};
+
+	/*--- Core stuff ---*/
+	
+	// Attach a hidden merge to data, which use later to decide what to re-render
 	let hiddenMergeMap = new WeakMap();
-	let noChangeSymbol = Symbol("no change");
+	let noChangeSymbol = Symbol();
 	function addHiddenMerge(data, mergeObj) {
 		if (!isObject(data)) return data;
 		let proxy = new Proxy(data, {
@@ -44,17 +112,49 @@ let Matsui = (() => {
 		return proxy;
 	}
 	function getHiddenMerge(data) {
-		return hiddenMergeMap.get(data);
+		let entry = hiddenMergeMap.get(data);
+		return (typeof entry == 'undefined') ? data : entry;
 	}
 
-	let updateTriggerSetKey = Symbol('updateFunctions');
+	// Track which parts of a data are "accessed" (meaning either returning a non-object value, or explicitly pierced)
+	let accessTrackingMap = new WeakMap();
+	function addAccessTracking(data, leafAccessFn, keyPath) {
+		let proxy = new Proxy(data, {
+			get(obj, prop) {
+				let value = Reflect.get(...arguments);
+				let subPath = keyPath.concat(prop);
+				if (isObject(value)) {
+					return addAccessTracking(value, leafAccessFn, subPath);
+				}
+				leafAccessFn(subPath);
+				return value;
+			},
+			ownKeys(obj) { // We're being asked to list our keys - assume this means they're interested in the whole object (including key addition and deletion)
+				leafAccessFn(keyPath);
+				return Reflect.ownKeys(obj);
+			}
+		});
+		accessTrackingMap.set(proxy, {data: data, accessFn: leafAccessFn, keyPath: keyPath});
+		return proxy;
+	}
+	function accessTracked(data) {
+		let entry = accessTrackingMap.get(data);
+		if (entry) {
+			entry.accessFn(entry.keyPath);
+			return entry.data;
+		}
+		return data;
+	}
+
+	// Use the above two concepts to (1) keep a map of what each update function accesses, and (2) only call the update functions affected by the hidden merge
+	let updateTriggerSetKey = Symbol();
 	function combineUpdatesWithTracking(updateFunctions) {
 		let currentUpdateIndex = null;
 		let updateTriggers;
 		// Whenever a property in our data tree is accessed during a render update, we stick that update in a parallel tree structure
 		let makeTracked = data => {
 			if (!isObject(data)) return data;
-			return trackAccess(data, keyPath => {
+			return addAccessTracking(data, keyPath => {
 				if (currentUpdateIndex == null) throw Error("Huh?");
 				let o = updateTriggers;
 				keyPath.forEach(k => {
@@ -82,7 +182,8 @@ let Matsui = (() => {
 			}
 
 			let mergeValue = getHiddenMerge(data);
-			
+
+			// Collect all the updates (by index) referenced by the merge, removing them as we go
 			let updateSet = new Set();
 			function addUpdates(merge, triggers) {
 				if (merge == noChangeSymbol) return;
@@ -97,10 +198,12 @@ let Matsui = (() => {
 				});
 			}
 			addUpdates(mergeValue, updateTriggers);
-			
-			updateSet.forEach(index => { // TODO: sort this, so that they're always run in the order provided, which would let us eagerly check template compatibility but only sometimes
-				currentUpdateIndex = index;
-				updateFunctions[index](tracked);
+
+			updateFunctions.forEach((fn, index) => {
+				if (updateSet.has(index)) {
+					currentUpdateIndex = index;
+					fn(tracked);
+				}
 			});
 			currentUpdateIndex = null;
 		};
@@ -124,7 +227,7 @@ let Matsui = (() => {
 
 		this.update = data => {
 			if (isObject(data)) {
-				let untracked = getUntracked(data); // if this is being called from inside a DataTemplateBinding, terminate the access tracking here
+				let untracked = accessTracked(data); // if this is being called from inside a DataTemplateBinding, terminate the access tracking here
 
 				if (!currentTemplateUpdate) {
 					clear();
@@ -173,7 +276,7 @@ let Matsui = (() => {
 		}
 
 		this.update = data => {
-			let untracked = getUntracked(data); // terminate any access tracking here (so we get notified for everything)
+			let untracked = accessTracked(data); // terminate any access tracking here (so we get notified for everything)
 			let mergeValue = getHiddenMerge(untracked); // and do our own filtering based on what's actually changed
 			// If the data is a non-null object or array, the merge must either be one too, or there's no change
 			if (mergeValue == noChangeSymbol) return;
@@ -192,14 +295,14 @@ let Matsui = (() => {
 				}
 				// Add bindings for new items
 				while (arrayBinds.length < untracked.length) {
+					let index = arrayBinds.length;
 					let itemEndNode = document.createTextNode("");
 					endNode.before(itemEndNode);
-
-					let index = arrayBinds.length;
-					let item = itemFn(index, untracked[index]);
 					let bind = new SingleValueBind(itemEndNode, template, innerTemplate);
 					arrayBinds.push(bind);
-					bind.update(item);
+
+					let untrackedItem = itemFn(index, untracked[index]);
+					bind.update(untrackedItem);
 				}
 			} else if (isObject(data)) {
 				if (arrayBinds) clear();
@@ -217,11 +320,12 @@ let Matsui = (() => {
 						let itemEndNode = document.createTextNode("");
 						endNode.before(itemEndNode);
 						objectBinds[key] = new SingleValueBind(itemEndNode, template, innerTemplate);
-						let item = itemFn(key, data[key]);
-						objectBinds[key].update(item);
+
+						let untrackedItem = itemFn(key, untracked[key]);
+						objectBinds[key].update(untrackedItem);
 					} else if (Object.hasOwn(mergeValue, key)) {
-						let item = itemFn(key, data[key]);
-						objectBinds[key].update(item);
+						let untrackedItem = itemFn(key, untracked[key]);
+						objectBinds[key].update(untrackedItem);
 					}
 				}
 			} else {
@@ -233,15 +337,27 @@ let Matsui = (() => {
 			endNode.remove();
 		};
 	}
+	
+	let specialAttributes = {
+		
+	};
 
 	/* scans a cloneable node tree, and adds setup functions to the nodeSetupList array */
 	function scanElementTemplate(node, nodeSetupList, scopedTemplates, nodePath) {
 		if (!node.childNodes) return;
+		
+		if (node.hasAttribute) {
+			for (let key in specialAttributes) {
+				if (node.hasAttribute(key)) {
+					specialAttributes[key](node, )
+				}
+			}
+		}
 
 		// TODO: collect and turn them into a single inline `<script>` at the top level
 		Array.from(node.childNodes).forEach(child => {
 			if (child.tagName == "SCRIPT" && child.hasAttribute("@setup")) {
-				let runScript = new Function("state", child.textContent);
+				let runScript = new Function("data", child.textContent);
 				nodeSetupList.push((templateRoot, innerTemplate) => {
 					let contextNode = templateRoot;
 					nodePath.forEach(i => contextNode = contextNode.childNodes[i]);
@@ -277,7 +393,40 @@ let Matsui = (() => {
 			
 			if (child.nodeType == 1) {
 				let childNodePath = nodePath.concat(childIndex);
-				if (child.hasAttribute("@items")) { // turn this element into a template and use it for items (using this item expression)
+
+				if (child.tagName == "SCRIPT" && child.hasAttribute("@expr")) {
+					let placeholder = document.createTextNode("");
+					child.replaceWith(placeholder);
+
+					valueFn = new Function('data', "return " + child.textContent.trim());
+					let extraTemplates = scopedTemplates;
+					nodeSetupList.push((templateRoot, innerTemplate) => {
+						let scopedTemplate = getScopedTemplate(innerTemplate);
+
+						let endNode = templateRoot;
+						childNodePath.forEach(i => endNode = endNode.childNodes[i]);
+
+						let bind = new SingleValueBind(endNode, scopedTemplate, innerTemplate);
+						return data => bind.update(valueFn(data));
+					});
+				} else if (child.tagName == "SCRIPT" && child.hasAttribute("@items")) {
+					let placeholder = document.createTextNode("");
+					child.replaceWith(placeholder);
+
+					itemFn = new Function('key', 'value', "return " + child.textContent.trim());
+					let extraTemplates = scopedTemplates;
+					nodeSetupList.push((templateRoot, innerTemplate) => {
+						let scopedTemplate = getScopedTemplate(innerTemplate);
+
+						let endNode = templateRoot;
+						childNodePath.forEach(i => endNode = endNode.childNodes[i]);
+
+						let bind = new CompositeValueBind(itemFn, endNode, scopedTemplate, innerTemplate);
+						return data => bind.update(data);
+					});
+				} else if (child.hasAttribute("@items")) { // turn this element into a template and use it for items (using this item expression)
+				// TODO: we only needed this because some elements (e.g. a table) would move text nodes, but we could replace with <script @items> instead
+
 					let itemExpr = child.getAttribute("@items");
 					if (itemExpr[0] == '>') itemExpr = "(key,value)=" + itemExpr
 					let itemFn = itemExpr ? eval(itemExpr) : ((key, value) => value);
@@ -293,11 +442,10 @@ let Matsui = (() => {
 						childNodePath.forEach(i => endNode = endNode.childNodes[i]);
 
 						let scopedTemplate = getScopedTemplate(innerTemplate);
-						let scopedItemTemplate = t => {
-							if (t !== "debug") throw Error("DEBUG");
+						let scopedItemTemplate = nullButWeIgnoreIt => {
 							return itemTemplate(scopedTemplate);
 						}
-						let bind = new CompositeValueBind(itemFn, endNode, scopedItemTemplate, "debug");
+						let bind = new CompositeValueBind(itemFn, endNode, scopedItemTemplate, null);
 						return bind.update;
 					});
 				} else {
@@ -349,7 +497,7 @@ let Matsui = (() => {
 							valueFn = (state => state);
 						} else if (prop[0] == '=') {
 							let valueExpr = prop.substr(1).trim();
-							if (valueExpr[0] == '>') valueExpr = "state =" + valueExpr
+							if (valueExpr[0] == '>') valueExpr = "data =" + valueExpr
 							valueFn = valueExpr ? eval(valueExpr) : (value => value);
 						} else {
 							valueFn = (state => state[prop]);
@@ -371,9 +519,9 @@ let Matsui = (() => {
 			}
 		}
 	}
-	let templateCacheSymbol = Symbol("template");
+	let templateCacheSymbol = Symbol();
 	let templateFromElement = element => {
-		if (element[templateCacheSymbol]) return element;
+		if (element[templateCacheSymbol]) return element[templateCacheSymbol];
 		
 		let cloneable = element.content || element;
 		let setupFunctions;
@@ -383,7 +531,10 @@ let Matsui = (() => {
 				scanElementTemplate(cloneable, setupFunctions = [], [], []);
 			}
 
-			let node = cloneable.cloneNode(true);
+			// we use the original and store a clone for future use
+			let node = cloneable;
+			cloneable = cloneable.cloneNode(true);
+			
 			let updates = [];
 			setupFunctions.forEach(fn => {
 				let update = fn(node, innerTemplate);
@@ -392,7 +543,7 @@ let Matsui = (() => {
 			return {node: node, updates: updates};
 		};
 		let filterExpr = element.getAttribute && element.getAttribute("@filter");
-		result.filter = new Function('state', 'return ' + (filterExpr || 'true'));
+		result.filter = new Function('data', 'return ' + (filterExpr || 'true'));
 		if (element.id) result.id = element.id;
 		return element[templateCacheSymbol] = result;
 	};
@@ -403,111 +554,7 @@ let Matsui = (() => {
 	}
 	let templateFromHtml = templateFromHtmlDefault;
 
-	function makeMergeValue(fromValue, toValue) {
-		if (!isObject(toValue) || !isObject(fromValue)) return toValue;
-		if (Array.isArray(toValue)) return toValue;
-
-		let obj = {};
-		Object.keys(toValue).forEach(key => {
-			if (Object.hasOwn(fromValue, key)) {
-				obj[key] = makeMergeValue(fromValue[key], toValue[key]);
-			} else {
-				obj[key] = toValue[key];
-			}
-		});
-		Object.keys(fromValue).forEach(key => {
-			if (!Object.hasOwn(toValue, key)) {
-				obj[key] = null;
-			}
-		});
-		return obj;
-	}
-	function applyMerge(value, mergeObj) {
-		// simple types are just overwritten
-		if (!isObject(value) || !isObject(mergeObj)) return mergeObj;
-		// Arrays overwrite everything
-		if (Array.isArray(mergeObj)) return mergeObj;
-
-		// They're both objects: mergey-merge
-		Object.keys(mergeObj).forEach(key => {
-			let mergeValue = mergeObj[key];
-			if (Object.hasOwn(value, key)) {
-				if (mergeValue == null) {
-					delete value[key];
-					return;
-				}
-				let previous = value[key];
-				let replacement = applyMerge(previous, mergeValue);
-				if (typeof previous != 'object' || typeof replacement != 'object' || replacement != previous) {
-					value[key] = replacement;
-				}
-			} else if (mergeValue != null) {
-				value[key] = mergeValue;
-			}
-		});
-		return value;
-	}
-		
-	// Wraps an object so that it notifies you (with a merge) every time it's changed
-	function mergeNotificationObject(data, updateFn, keyPath) {
-		if (!isObject(data)) return data;
-		return new Proxy(data, {
-			get(obj, prop) {
-				let value = Reflect.get(...arguments);
-				if (isObject(value)) {
-					return mergeNotificationObject(value, updateFn, keyPath.concat(prop));
-				}
-				return value;
-			},
-			set(obj, prop, value, proxy) {
-				if (value == null) return Reflect.deleteProperty(proxy, prop);
-				let oldValue = Reflect.get(obj, prop);
-				if (Reflect.set(obj, prop, value)) {
-					let merge = {[prop]: makeMergeValue(oldValue, value)};
-					updateFn(merge, keyPath);
-					return true;
-				}
-				return false;
-			},
-			deleteProperty(obj, prop) {
-				if (Reflect.deleteProperty(obj, prop)) {
-					updateFn({[prop]: null}, keyPath);
-					return true;
-				}
-				return false;
-			}
-		});
-	}
-	
-	let mergeTracker = (data, updateFn, immediate) => {
-		let pendingMerge = null, pendingMergeTimeout = null;
-		let notifyPendingMerge = () => {
-			clearTimeout(pendingMergeTimeout);
-			if (pendingMerge) {
-				updateFn(pendingMerge);
-				pendingMerge = null;
-			}
-		}
-		// Assembles a JSON Patch Merge for any observed changes, and calls .notifyMerged()
-		return mergeNotificationObject(data, (mergeObj, keyPath) => {
-			for (let i = keyPath.length - 1; i >= 0; --i) {
-				let key = keyPath[i];
-				mergeObj = {[key]: mergeObj};
-			}
-			
-			if (immediate) {
-				updateFn(mergeObj);
-			} else if (pendingMerge) { // collect multiple changes together
-				pendingMerge = applyMerge(pendingMerge, mergeObj);
-			} else {
-				pendingMerge = mergeObj;
-				requestAnimationFrame(notifyPendingMerge);
-				pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
-			}
-		}, []);
-	};
-
-	let fallbackTemplate = templateFromHtml(`<template @filter="Array.isArray(state)"><details><summary>[{{=a=>a.length}} items]</summary><ol><li @items="(k,v)=>[v]">{{0}}</li></ol></details></template><template><details @items="(k,v)=>[k,v]" style="width:100%;box-sizing:border-box;font-size:0.8rem;line-height:1.2"><summary style="opacity:0.75;font-style:italic;cursor:pointer">{{0}}</summary><div style="margin-inline-start:2em;margin-inline-start:calc(min(4em,10%))">{{1}}</div></details></template>{{=}}`);
+	let fallbackTemplate = templateFromHtml(`<template @filter="Array.isArray(data)"><details><summary>[{{=a=>a.length}} items]</summary><ol><li @items="(k,v)=>[v]">{{0}}</li></ol></details></template><template><details @items="(k,v)=>[k,v]" style="width:100%;box-sizing:border-box;font-size:0.8rem;line-height:1.2"><summary style="opacity:0.75;font-style:italic;cursor:pointer">{{0}}</summary><div style="margin-inline-start:2em;margin-inline-start:calc(min(4em,10%))">{{1}}</div></details></template>{{=}}`);
 	function templateFromList(list) {
 		return innerTemplate => {
 			let node = document.createDocumentFragment();
@@ -540,11 +587,20 @@ let Matsui = (() => {
 		}
 	}
 
-	function TrackedDisplay(host, data, template) {
-		let endNode = document.createTextNode("");
-		host.append(endNode);
-		let bind = new SingleValueBind(endNode, template, template);
+	function TrackedDisplay(host, data, template, innerTemplate, replaceHost) {
+		let updateDisplay;
+		if (replaceHost) { // Replaces the host instead of adding to it - but it will now always use the template, never a basic value
+			let bindingInfo = template(innerTemplate || fallbackTemplate), bindingNode = bindingInfo.node;
+			if (host != bindingNode) host.replaceWith(bindingNode); // if the template was created from the host (so we're filling out an existing element), they could be the same
+			updateDisplay = combineUpdatesWithTracking(bindingInfo.updates);
+		} else {
+			let endNode = document.createTextNode("");
+			host.append(endNode); // happens before the bind so it can identify the start
+			let bind = new SingleValueBind(endNode, template, innerTemplate || fallbackTemplate);
+			updateDisplay = bind.update;
+		}
 
+		// Provide updates
 		let updateFunctions = [];
 		let updateAndNotify = mergeObj => {
 			updateFunctions.forEach(fn => fn(mergeObj));
@@ -554,46 +610,45 @@ let Matsui = (() => {
 			return this;
 		};
 
-		let tracked = mergeTracker(data, updateAndNotify);
-		bind.update(tracked);
+		let tracked;
+		let setData = newData => {
+			data = newData;
+			tracked = merge.watchAsync(data, updateAndNotify);
+		};
+		setData(data);
+		updateDisplay(tracked);
+		this.data = () => {
+			return tracked;
+		};
 		
-		// If you have already changed `data`, but want to tell us about it
-		let notifyMerged = this.notifyMerged = mergeObj => {
+		let notifyMerged = mergeObj => {
 			let withHiddenMerge = addHiddenMerge(tracked, mergeObj);
-			bind.update(withHiddenMerge);
+			updateDisplay(withHiddenMerge);
 		};
 		updateFunctions.push(notifyMerged);
+		// If you have already changed `data`, but want to tell us about it
+		this.notifyMerged = notifyMerged;
 
+		// Make changes to the data
 		this.merge = mergeObj => {
-			let newData = applyMerge(data, mergeObj);
-			if (newData != data) {
-				data = newData;
-				tracked = mergeTracker(data, updateAndNotify);
-			}
+			let newData = merge.apply(data, mergeObj);
+			if (newData != data) setData(newData);
 			notifyMerged(mergeObj);
 		};
-		
 		this.replace = newData => {
-			let mergeValue = makeMergeValue(data, newData);
-			data = newData;
-			tracked = mergeTracker(data, updateAndNotify);
-			bind.update(null); // clears everything out
-			notifyMerged(mergeValue);
+			let mergeObj = newData;
+			if (replaceHost) {
+				mergeObj = merge.make(data, newData);
+			} else {
+				updateDisplay(null); // clears the render down to just a text node
+			}
+			setData(newData);
+			notifyMerged(mergeObj);
 		};
 	}
 	
 	let api = {
-		merge: {
-			track(data, updateFn, immediate) {
-				return mergeTracker(data, updateFn, immediate);
-			},
-			make(fromData, toData) {
-				makeMergeValue(fromData, toData);
-			},
-			apply(toData, mergeValue) {
-				return applyMerge(toData, mergeValue); // might return a different object
-			}
-		},
+		merge: merge,
 		template: {
 			// If the templates have an extra `.filter()` function, they can decline to render the data.  This uses the first template which accepts the data (or has no `.filter()`).
 			fromList(list) {
@@ -631,9 +686,16 @@ let Matsui = (() => {
 			}
 		},
 		
-		show: (element, data, template, updateFn) => {
+		// TODO: rename to .addTo() ?
+		show: (element, data, template, innerTemplate) => {
+			if (typeof element == 'string') element = document.querySelector(element);
 			if (typeof template != 'function') template = api.template.fromElements(template || 'template');
-			return new TrackedDisplay(element, data, template, updateFn);
+			return new TrackedDisplay(element, data, template, innerTemplate, false);
+		},
+		replace: (element, data, template, innerTemplate) => {
+			if (typeof element == 'string') element = document.querySelector(element);
+			if (!template) template = api.template.fromElement(element);
+			return new TrackedDisplay(element, data, template, innerTemplate, true);
 		}
 	}
 	return api;
