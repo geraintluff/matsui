@@ -82,9 +82,9 @@
 					html: `<script src="matsui.js"></${'script'}>
 
 <div>
-	<div>Counter: {{counter}}</div>
-	<div>Next: {{=> data.counter + 1}}</div>
-	<button @click="++data.counter">add</button>
+	<div>Counter: {counter}</div>
+	<div>Next: ${data => data.counter + 1}</div>
+	<button @click="${data => data.counter}">add</button>
 </div>`,
 					js: `Matsui.inPlace(div, {counter: 0});`
 				});

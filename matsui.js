@@ -7,6 +7,7 @@ let Matsui = (() => {
 	// Attach a hidden merge to data, which use later to decide what to re-render
 	let hiddenMergeMap = new WeakMap();
 	let noChangeSymbol = Symbol('no change');
+
 	let merge = {
 		apply(value, mergeValue, keepNulls) {
 			// simple types are just overwritten
@@ -53,13 +54,13 @@ let Matsui = (() => {
 			if (canBeUndefined && Object.keys(mergeObj).length == 0) return;
 			return mergeObj;
 		},
-		watch(data, updateFn) {
+		tracked(data, updateFn) {
 			if (!isObject(data)) return data;
 			return new Proxy(data, {
 				get(obj, prop) {
 					let value = Reflect.get(...arguments);
 					if (!isObject(value)) return value;
-					return merge.watch(
+					return merge.tracked(
 						value,
 						mergeObj => updateFn({
 							[prop]: mergeObj
@@ -89,7 +90,7 @@ let Matsui = (() => {
 			});
 		},
 		// collects multiple changes together
-		watchAsync(data, updateFn) {
+		trackedAsync(data, updateFn) {
 			let pendingMerge = null, pendingMergeTimeout = null;
 			let notifyPendingMerge = () => {
 				clearTimeout(pendingMergeTimeout);
@@ -98,7 +99,7 @@ let Matsui = (() => {
 					pendingMerge = null;
 				}
 			}
-			return merge.watch(data, mergeObj => {
+			return merge.tracked(data, mergeObj => {
 				if (pendingMerge) {
 					pendingMerge = merge.apply(pendingMerge, mergeObj, true); // keep nulls because they're meaningful
 				} else {
@@ -127,70 +128,59 @@ let Matsui = (() => {
 		}
 	};
 
+	/*--- Access-tracking ---*/
+
+	let trackerSetKey = Symbol(), pierceKey = Symbol();
+	let addTrackerValue = (trackerObj, trackerValue) => {
+		if (!trackerObj[trackerSetKey]) trackerObj[trackerSetKey] = new Set();
+		trackerObj[trackerSetKey].add(trackerValue);
+	}
+	let access = {
+		tracked(data, trackerObj, trackerValue) {
+			let proxy = new Proxy(data, {
+				get(obj, prop) {
+					let value = Reflect.get(...arguments);
+					if (prop == pierceKey) {
+						addTrackerValue(trackerObj, trackerValue);
+						return data;
+					}
+					
+					if (!(prop in trackerObj)) trackerObj[prop] = {};
+					let subTracker = trackerObj[prop];
+					if (isObject(value)) {
+						return access.tracked(value, subTracker, trackerValue);
+					}
+					addTrackerValue(subTracker, trackerValue);
+					return value;
+				},
+				ownKeys(obj) { // We're being asked to list our keys - assume this means they're interested in the whole object (including key addition and deletion)
+					return Reflect.ownKeys(obj);
+				}
+			});
+			return proxy;
+		},
+		pierce(tracked) {
+			return (tracked && tracked[pierceKey]) || tracked;
+		},
+		values(trackerObj) {
+			return trackerObj[trackerSetKey];
+		}
+	};
+
 	/*--- Core stuff ---*/
 
-	// Track which parts of a data are "accessed" (meaning either returning a non-object value, or explicitly pierced)
-	let accessTrackingMap = new WeakMap();
-	function addAccessTracking(data, leafAccessFn, keyPath) {
-		let proxy = new Proxy(data, {
-			get(obj, prop) {
-				let value = Reflect.get(...arguments);
-				let subPath = keyPath.concat(prop);
-				if (isObject(value)) {
-					return addAccessTracking(value, leafAccessFn, subPath);
-				}
-				leafAccessFn(subPath);
-				return value;
-			},
-			ownKeys(obj) { // We're being asked to list our keys - assume this means they're interested in the whole object (including key addition and deletion)
-				leafAccessFn(keyPath);
-				return Reflect.ownKeys(obj);
-			}
-		});
-		accessTrackingMap.set(proxy, {data: data, accessFn: leafAccessFn, keyPath: keyPath});
-		return proxy;
-	}
-	function accessTracked(data) {
-		let entry = accessTrackingMap.get(data);
-		if (entry) {
-			entry.accessFn(entry.keyPath);
-			return entry.data;
-		}
-		return data;
-	}
-
 	// Use the above two concepts to (1) keep a map of what each update function accesses, and (2) only call the update functions affected by the hidden merge
-	let updateTriggerSetKey = Symbol();
 	function combineUpdatesWithTracking(updateFunctions) {
-		let currentUpdateIndex = null;
-		let updateTriggers;
-		// Whenever a property in our data tree is accessed during a render update, we stick that update in a parallel tree structure
-		let makeTracked = data => {
-			if (!isObject(data)) return data;
-			return addAccessTracking(data, keyPath => {
-				if (currentUpdateIndex == null) throw Error("Huh?");
-				let o = updateTriggers;
-				keyPath.forEach(k => {
-					if (!Object.hasOwn(o, k)) o[k] = {};
-					o = o[k];
-				});
-
-				// Add the current update identifier to the trigger map
-				if (!o[updateTriggerSetKey]) o[updateTriggerSetKey] = new Set();
-				o[updateTriggerSetKey].add(currentUpdateIndex);
-			}, []);
-		}
+		let updateTriggers = {};
+		let firstRun = true;
 
 		return data => {
-			let tracked = makeTracked(data);
-
-			if (!updateTriggers) { // first run - set up the trigger map and run all the updates
-				updateTriggers = {};
+			if (firstRun) { // first run - set up the trigger map and run all the updates
+				firstRun = false;
 				updateFunctions.forEach((fn, index) => {
-					currentUpdateIndex = index;
+					let tracked = access.tracked(data, updateTriggers, index);
 					fn(tracked);
 				});
-				currentUpdateIndex = null;
 				return;
 			}
 
@@ -200,7 +190,7 @@ let Matsui = (() => {
 			let updateSet = new Set();
 			function addUpdates(merge, triggers) {
 				if (merge == noChangeSymbol) return;
-				let updates = triggers[updateTriggerSetKey];
+				let updates = access.values(triggers);
 				if (updates) {
 					updates.forEach(index => updateSet.add(index));
 					updates.clear();
@@ -214,11 +204,10 @@ let Matsui = (() => {
 
 			updateFunctions.forEach((fn, index) => {
 				if (updateSet.has(index)) {
-					currentUpdateIndex = index;
+					let tracked = access.tracked(data, updateTriggers, index);
 					fn(tracked);
 				}
 			});
-			currentUpdateIndex = null;
 		};
 	}
 	
@@ -240,7 +229,7 @@ let Matsui = (() => {
 
 		this.update = data => {
 			if (isObject(data)) {
-				let untracked = accessTracked(data); // if this is being called from inside a DataTemplateBinding, terminate the access tracking here
+				let untracked = access.pierce(data); // if this is being called from inside a DataTemplateBinding, terminate the access tracking here
 
 				if (!currentTemplateUpdate) {
 					clear();
@@ -289,7 +278,7 @@ let Matsui = (() => {
 		}
 
 		this.update = data => {
-			let untracked = accessTracked(data); // terminate any access tracking here (so we get notified for everything)
+			let untracked = access.pierce(data); // terminate any access tracking here (so we get notified for everything)
 			let mergeValue = merge.getHidden(untracked, noChangeSymbol); // and do our own filtering based on what's actually changed
 			// If the data is a non-null object or array, the merge must either be one too, or there's no change
 			if (mergeValue == noChangeSymbol) return;
@@ -625,7 +614,7 @@ let Matsui = (() => {
 		let tracked;
 		let setData = newData => {
 			data = newData;
-			tracked = merge.watchAsync(data, updateAndNotify);
+			tracked = merge.trackedAsync(data, updateAndNotify);
 		};
 		setData(data);
 		updateDisplay(tracked);
@@ -661,6 +650,7 @@ let Matsui = (() => {
 	
 	let api = {
 		merge: merge,
+		access: access,
 		template: {
 			// If the templates have an extra `.filter()` function, they can decline to render the data.  This uses the first template which accepts the data (or has no `.filter()`).
 			fromList(list) {

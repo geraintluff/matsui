@@ -33,7 +33,6 @@ Test("no extra keys", (api, pass, fail, assert) => {
 	pass();
 });
 
-
 Test("get", (api, pass, fail, assert) => {
 	let data = {foo: {bar: 'baz', bing: 'zap'}, extra: {no: 'merge'}};
 	let merge = {foo: {bar: 10}};
