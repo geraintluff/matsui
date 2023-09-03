@@ -7,7 +7,7 @@
 		<script src="../matsui.js"></script>
 		<script>
 			let api = Matsui;
-			let suiteKeys = ['merge', 'merge-watch'];
+			let suiteKeys = ['access', 'merge', 'merge-watch', 'merge-hidden'];
 		</script>
 
 		<script>
@@ -45,12 +45,32 @@
 						fail(m);
 						throw Error("fail()"); // stops execution of the test, and also helps debugging
 					};
+					let assert = (check, message) => {
+						if (!check) testFail(message || "failed assertion check");
+					};
+					assert.deepEqual = (a, b) => {
+						if (!a || typeof a !== 'object') {
+							return assert(a === b);
+						}
+						if (Array.isArray(a)) {
+							assert(Array.isArray(b));
+							assert(a.length == b.length);
+							a.forEach((item, index) => {
+								assert.deepEqual(item, b[index]);
+							});
+						} else {
+							assert(b && typeof b == 'object');
+							assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort());
+							for (let key in a) {
+								assert.deepEqual(a[key], b[key]);
+							}
+						}
+					}
+					
 					runFn(api, (p, m) => {
 						clearTimeout(timeout);
 						pass(p, m);
-					}, testFail, (check, message) => {
-						if (!check) testFail(message || "failed assertion check");
-					});
+					}, testFail, assert);
 				};
 				
 				let suite = scriptMap.get(document.currentScript);
@@ -108,6 +128,7 @@
 				
 					let currentSuiteIndex = 0, currentTestIndex = 0;
 					function runNextTest() {
+						if (failed) return;
 						let suite = suites[currentSuiteIndex];
 						while (suite && currentTestIndex >= suite.tests.length) {
 							suite = suites[++currentSuiteIndex];
@@ -146,6 +167,7 @@
 					let suitesLoaded = 0;
 					suites.forEach(suite => {
 						suite.load(onload => {
+							if (failed) return renderData.message = `error in ${suite.name}: ${renderData.message}`;
 							if (++suitesLoaded == suites.length) {
 								renderData.message = "all suites loaded";
 
@@ -191,9 +213,6 @@
 								</template>
 
 								<table class="tests">
-									<thead>
-										<tr><th>iframe</th><th>name</th><th></th>
-									</thead>
 									<tbody>
 										<tr @items>
 											<td class="status">{{=> mapStatus(data.status.iframe)}}</td>
@@ -201,6 +220,9 @@
 											<td>{{message}}</td>
 										</tr>
 									</tbody>
+									<tfoot>
+										<tr><th>iframe</th><th>name</th><th></th>
+									</tfoot>
 								</table>
 							</template>
 							{{tests}}
@@ -223,7 +245,8 @@
 			
 				#message-container {
 					width: 100%;
-					min-height: 2em;
+					height: 2em;
+					overflow: scroll;
 					border: 1px solid #888;
 					position: relative;
 				}
@@ -269,7 +292,7 @@
 				.tests td.name {
 					font-weight: bold;
 				}
-				.tests thead th {
+				.tests tfoot th {
 					background: transparent;
 					color: #888;
 					font-size: 0.65em;

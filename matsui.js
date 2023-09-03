@@ -1,8 +1,12 @@
+"use strict"
 let Matsui = (() => {
 	let isObject = data => (data && typeof data === 'object');
 
 	/*--- JSON Patch Merge stuff ---*/
 
+	// Attach a hidden merge to data, which use later to decide what to re-render
+	let hiddenMergeMap = new WeakMap();
+	let noChangeSymbol = Symbol('no change');
 	let merge = {
 		apply(value, mergeValue, keepNulls) {
 			// simple types are just overwritten
@@ -103,29 +107,27 @@ let Matsui = (() => {
 					pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
 				}
 			});
+		},
+		addHidden(data, mergeObj) {
+			if (!isObject(data)) return data;
+			let proxy = new Proxy(data, {
+				get(obj, prop) {
+					let value = Reflect.get(...arguments);
+					let hasChange = isObject(mergeObj) && (prop in mergeObj);
+					return merge.addHidden(value, hasChange ? mergeObj[prop] : noChangeSymbol);
+				}
+			});
+			hiddenMergeMap.set(proxy, mergeObj);
+			return proxy;
+		},
+		getHidden(data, noChange) {
+			let entry = hiddenMergeMap.get(data);
+			if (entry === noChangeSymbol) return noChange;
+			return (typeof entry == 'undefined') ? data : entry;
 		}
 	};
 
 	/*--- Core stuff ---*/
-	
-	// Attach a hidden merge to data, which use later to decide what to re-render
-	let hiddenMergeMap = new WeakMap();
-	let noChangeSymbol = Symbol();
-	function addHiddenMerge(data, mergeObj) {
-		if (!isObject(data)) return data;
-		let proxy = new Proxy(data, {
-			get(obj, prop) {
-				let value = Reflect.get(...arguments);
-				return addHiddenMerge(value, mergeObj ? mergeObj[prop] : noChangeSymbol);
-			}
-		});
-		hiddenMergeMap.set(proxy, mergeObj);
-		return proxy;
-	}
-	function getHiddenMerge(data) {
-		let entry = hiddenMergeMap.get(data);
-		return (typeof entry == 'undefined') ? data : entry;
-	}
 
 	// Track which parts of a data are "accessed" (meaning either returning a non-object value, or explicitly pierced)
 	let accessTrackingMap = new WeakMap();
@@ -192,7 +194,7 @@ let Matsui = (() => {
 				return;
 			}
 
-			let mergeValue = getHiddenMerge(data);
+			let mergeValue = merge.getHidden(data, noChangeSymbol);
 
 			// Collect all the updates (by index) referenced by the merge, removing them as we go
 			let updateSet = new Set();
@@ -288,7 +290,7 @@ let Matsui = (() => {
 
 		this.update = data => {
 			let untracked = accessTracked(data); // terminate any access tracking here (so we get notified for everything)
-			let mergeValue = getHiddenMerge(untracked); // and do our own filtering based on what's actually changed
+			let mergeValue = merge.getHidden(untracked, noChangeSymbol); // and do our own filtering based on what's actually changed
 			// If the data is a non-null object or array, the merge must either be one too, or there's no change
 			if (mergeValue == noChangeSymbol) return;
 			
@@ -364,6 +366,11 @@ let Matsui = (() => {
 				}
 			}
 		}
+		
+		let getFn = (expr, defaultArgs, defaultFn) => {
+			if (expr[0] == '>') expr = "(" + defaultArgs + ")=" + expr;
+			return expr ? (new Function('return ' + expr))() : defaultFn;
+		};
 
 		// TODO: collect and turn them into a single inline `<script>` at the top level
 		Array.from(node.childNodes).forEach(child => {
@@ -409,7 +416,7 @@ let Matsui = (() => {
 					let placeholder = document.createTextNode("");
 					child.replaceWith(placeholder);
 
-					valueFn = new Function('data', "return " + child.textContent.trim());
+					let valueFn = new Function('data', "return " + child.textContent.trim());
 					let extraTemplates = scopedTemplates;
 					nodeSetupList.push((templateRoot, innerTemplate) => {
 						let scopedTemplate = getScopedTemplate(innerTemplate);
@@ -424,7 +431,7 @@ let Matsui = (() => {
 					let placeholder = document.createTextNode("");
 					child.replaceWith(placeholder);
 
-					itemFn = new Function('key', 'value', "return " + child.textContent.trim());
+					let itemFn = new Function('key', 'value', "return " + child.textContent.trim());
 					let extraTemplates = scopedTemplates;
 					nodeSetupList.push((templateRoot, innerTemplate) => {
 						let scopedTemplate = getScopedTemplate(innerTemplate);
@@ -438,9 +445,7 @@ let Matsui = (() => {
 				} else if (child.hasAttribute("@items")) { // turn this element into a template and use it for items (using this item expression)
 				// TODO: we only needed this because some elements (e.g. a table) would move text nodes, but we could replace with <script @items> instead
 
-					let itemExpr = child.getAttribute("@items");
-					if (itemExpr[0] == '>') itemExpr = "(key,value)=" + itemExpr
-					let itemFn = itemExpr ? eval(itemExpr) : ((key, value) => value);
+					let itemFn = getFn(child.getAttribute("@items"), 'key,value', (key, value) => value);
 					
 					let placeholder = document.createTextNode("");
 					child.replaceWith(placeholder); // has same path
@@ -489,9 +494,7 @@ let Matsui = (() => {
 					endNode.nodeValue = "(pending)";
 					
 					if (prop[0] == '#') {
-						let itemExpr = prop.substr(1).trim();
-						if (itemExpr[0] == '>') itemExpr = "(key, value) =" + itemExpr
-						let itemFn = itemExpr ? eval(itemExpr) : ((key, value) => value);
+						let itemFn = getFn(prop.substr(1).trim(), 'key,value', (key, value) => value);
 
 						nodeSetupList.push((templateRoot, innerTemplate) => {
 							let scopedTemplate = getScopedTemplate(innerTemplate);
@@ -507,9 +510,7 @@ let Matsui = (() => {
 						if (prop == "=") {
 							valueFn = (state => state);
 						} else if (prop[0] == '=') {
-							let valueExpr = prop.substr(1).trim();
-							if (valueExpr[0] == '>') valueExpr = "data =" + valueExpr
-							valueFn = valueExpr ? eval(valueExpr) : (value => value);
+							valueFn = getFn(prop.substr(1).trim(), 'data', value => value);
 						} else {
 							valueFn = (state => state[prop]);
 						}
@@ -633,7 +634,7 @@ let Matsui = (() => {
 		};
 		
 		let notifyMerged = mergeObj => {
-			let withHiddenMerge = addHiddenMerge(tracked, mergeObj);
+			let withHiddenMerge = merge.addHidden(tracked, mergeObj);
 			updateDisplay(withHiddenMerge);
 		};
 		updateFunctions.push(notifyMerged);

@@ -1,22 +1,3 @@
-function assertDeepEqual(assert, a, b) {
-	if (!a || typeof a !== 'object') {
-		return assert(a === b);
-	}
-	if (Array.isArray(a)) {
-		assert(Array.isArray(b));
-		assert(a.length == b.length);
-		a.forEach((item, index) => {
-			assertDeepEqual(assert, item, b[index]);
-		});
-	} else {
-		assert(b && typeof b == 'object');
-		assertDeepEqual(assert, Object.keys(a).sort(), Object.keys(b).sort());
-		for (let key in a) {
-			assertDeepEqual(assert, a[key], b[key]);
-		}
-	}
-}
-
 Test("plain values", (api, pass, fail, assert) => {
 	let plainValues = [
 		50,
@@ -65,9 +46,9 @@ Test("synchronous", (api, pass, fail, assert) => {
 	function listener(mergeObj) {
 		assert(typeof mergeObj != 'undefined');
 		let expected = expectedList.shift();
-		assertDeepEqual(assert, mergeObj, expected);
+		assert.deepEqual(mergeObj, expected);
 		dataCopy = api.merge.apply(dataCopy, mergeObj);
-		assertDeepEqual(assert, dataCopy, data); // the changes represent the correct modification
+		assert.deepEqual(dataCopy, data); // the changes represent the correct modification
 	}
 
 	let tracked = api.merge.watch(data, listener);
@@ -98,9 +79,9 @@ Test("asynchronous", (api, pass, fail, assert) => {
 	function listener(mergeObj) {
 		assert(typeof mergeObj != 'undefined');
 		let expected = expectedList.shift();
-		assertDeepEqual(assert, mergeObj, expected);
+		assert.deepEqual(mergeObj, expected);
 		dataCopy = api.merge.apply(dataCopy, mergeObj);
-		assertDeepEqual(assert, dataCopy, data); // the changes represent the correct modification
+		assert.deepEqual(dataCopy, data); // the changes represent the correct modification
 	}
 
 	let tracked = api.merge.watchAsync(data, listener);
