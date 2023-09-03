@@ -4,7 +4,7 @@ let Matsui = (() => {
 	/*--- JSON Patch Merge stuff ---*/
 
 	let merge = {
-		apply(value, mergeValue) {
+		apply(value, mergeValue, keepNulls) {
 			// simple types are just overwritten
 			if (!isObject(value) || !isObject(mergeValue)) return mergeValue;
 			// Arrays overwrite everything
@@ -14,35 +14,40 @@ let Matsui = (() => {
 			Object.keys(mergeValue).forEach(key => {
 				let childMerge = mergeValue[key];
 				if (Object.hasOwn(value, key)) {
-					if (childMerge == null) {
+					if (childMerge == null && !keepNulls) {
 						delete value[key];
 						return;
 					}
-					value[key] = merge.apply(value[key], childMerge);
+					value[key] = merge.apply(value[key], childMerge, keepNulls);
 				} else if (childMerge != null) {
 					value[key] = childMerge;
 				}
 			});
 			return value;
 		},
-		make(fromValue, toValue) {
+		make(fromValue, toValue, canBeUndefined) {
+			if (canBeUndefined && fromValue === toValue) return;
 			if (!isObject(toValue) || !isObject(fromValue)) return toValue;
 			if (Array.isArray(toValue)) return toValue;
 
-			let obj = {};
+			let mergeObj = {};
 			Object.keys(toValue).forEach(key => {
 				if (Object.hasOwn(fromValue, key)) {
-					obj[key] = merge.make(fromValue[key], toValue[key]);
+					let subMerge = merge.make(fromValue[key], toValue[key], true);
+					if (typeof subMerge !== 'undefined') {
+						mergeObj[key] = subMerge;
+					}
 				} else {
-					obj[key] = toValue[key];
+					mergeObj[key] = toValue[key];
 				}
 			});
 			Object.keys(fromValue).forEach(key => {
 				if (!Object.hasOwn(toValue, key)) {
-					obj[key] = null;
+					mergeObj[key] = null;
 				}
 			});
-			return obj;
+			if (canBeUndefined && Object.keys(mergeObj).length == 0) return;
+			return mergeObj;
 		},
 		watch(data, updateFn) {
 			if (!isObject(data)) return data;
@@ -52,21 +57,27 @@ let Matsui = (() => {
 					if (!isObject(value)) return value;
 					return merge.watch(
 						value,
-						mergeObj => updateFn({[prop]: mergeObj})
+						mergeObj => updateFn({
+							[prop]: mergeObj
+						})
 					);
 				},
 				set(obj, prop, value, proxy) {
 					if (value == null) return Reflect.deleteProperty(proxy, prop);
 					let oldValue = Reflect.get(obj, prop);
 					if (Reflect.set(obj, prop, value)) {
-						updateFn({[prop]: value});
+						updateFn({
+							[prop]: merge.make(oldValue, value)
+						});
 						return true;
 					}
 					return false;
 				},
 				deleteProperty(obj, prop) {
 					if (Reflect.deleteProperty(obj, prop)) {
-						updateFn({[prop]: null});
+						updateFn({
+							[prop]: null
+						});
 						return true;
 					}
 					return false;
@@ -85,7 +96,7 @@ let Matsui = (() => {
 			}
 			return merge.watch(data, mergeObj => {
 				if (pendingMerge) {
-					pendingMerge = merge.apply(pendingMerge, mergeObj);
+					pendingMerge = merge.apply(pendingMerge, mergeObj, true); // keep nulls because they're meaningful
 				} else {
 					pendingMerge = mergeObj;
 					requestAnimationFrame(notifyPendingMerge);

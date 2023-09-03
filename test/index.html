@@ -2,105 +2,16 @@
 <html>
 	<head>
 		<title>Matsui tests</title>
-		<style>
-			body {
-				font-family: sans-serif;
-				padding: 0;
-				margin: 0;
-			}
-		
-			#message-container {
-				width: 100%;
-				height: 2em;
-				border: 1px solid #888;
-				position: relative;
-			}
-			
-			#iframe-runner, #message {
-				position: absolute;
-				top: 0;
-				left: 0;
-				height: 100%;
-				width: 100%;
-				text-align: center;
-				border: none;
-				line-height: 1;
-				padding: 0.5em;
-				background-color: #EEE;
-				color: #666;
-				box-sizing: border-box;
-			}
-
-			.suites, .tests {
-				border-spacing: 0;
-			}
-			.suites th {
-				background: #006;
-				color: #FFF;
-			}
-			.suites td {
-				padding: 0;
-			}
-			.suites th, .suites .header td, .tests td {
-				padding: 0.3em 0.5em;
-			}
-			.tests th {
-				background: #DEF;
-				color: #000;
-			}
-			.suite .header {
-				display: flex;
-				flex-direction: row;
-			}
-			.suite .header .name
-		</style>
 	</head>
 	<body>
-		<template id="test-runner-template">
-			<div id="message-container">
-				<iframe id="iframe-runner"></iframe>
-				<div id="message">{{message}}</div>
-			</div>
-			
-			<template>
-				<template>
-					<tr class="header">
-						<th>{{name}}</th>
-						<td>{{=> data.tests.length}} items</td>
-					</tr>
-					<tr class="test-list">
-						<td></td>
-						<td>
-							<template>
-								<template>
-									{{name}}: {{status}} : {{message}}
-								</template>
-
-								<table class="tests">
-									<tr @items>
-										<th>{{name}}</th>
-										<td>{{=> data.status.iframe}}</td>
-										<td>{{message}}</td>
-									</tr>
-								</table>
-							</template>
-							{{tests}}
-						</td>
-					</div>
-				</template>
-				<table class="suites">
-					<script @items>value</script>
-				</table>
-			</template>
-			{{suites}}
-		</template>
-		
 		<script src="../matsui.js"></script>
 		<script>
 			let api = Matsui;
-			let suiteKeys = ['basic'];
+			let suiteKeys = ['merge', 'merge-watch'];
+		</script>
 
-			let renderData = {message: 'loading...'};
+		<script>
+			let renderData = {message: 'loading...', failed: false};
 
 			let scriptMap = new WeakMap();
 			function Suite(name) {
@@ -114,7 +25,7 @@
 				this.load = (onload) => {
 					let script = document.createElement('script');
 					script.src = name + ".js";
-					script.onerror = e => fail(e.message);
+					script.onerror = e => fail("failed to load: " + script.src);
 					script.onload = onload;
 					document.body.append(script);
 					
@@ -129,12 +40,16 @@
 				this.message = "";
 				this.run = (pass, fail) => {
 					let timeout = setTimeout(() => fail("timeout"), 500);
+					let testFail = (m) => {
+						clearTimeout(timeout);
+						fail(m);
+						throw Error("fail()"); // stops execution of the test, and also helps debugging
+					};
 					runFn(api, (p, m) => {
 						clearTimeout(timeout);
 						pass(p, m);
-					}, (m) => {
-						clearTimeout(timeout);
-						fail(m);
+					}, testFail, (check, message) => {
+						if (!check) testFail(message || "failed assertion check");
 					});
 				};
 				
@@ -142,10 +57,16 @@
 				suite.tests.push(this);
 			}
 
+			let failed = false, passed = false;
+			let failureObject = {};
 			function fail(message) {
+				if (failed) return;
+				failed = true;
 				if (window.parent != window) {
-					window.parent.postMessage({fail: message}, '*');
+					failureObject.fail = message || 'failed';
+					window.parent.postMessage(failureObject, '*');
 				} else {
+					renderData.failed = true;
 					console.error(renderData.message = message);
 				}
 			}
@@ -158,73 +79,208 @@
 				window.onmessage = event => {
 					let data = event.data;
 					let suite = new Suite(data.suite);
+					failureObject.suite = data.suite;
+					failureObject.test = data.test;
 					suite.load(e => {
-						suite.tests[data.test].run((didPass, message) => {
-							if (didPass === false) return fail(message);
-							window.parent.postMessage({pass: message || didPass}, '*');
-						}, failMessage => {
-							console.log("failed, sending", failMessage);
-							fail(failMessage);
-						});
+						suite.tests[data.test].run(function pass(wait) {
+							if (wait) {
+								// lets us call .pass(true) at the start, and then .fail() afterwards before the pass is sent
+								setTimeout(() => pass(), 0);
+							} else {
+								if (failed || passed) return;
+								passed = true;
+								window.parent.postMessage({pass: true}, '*');
+							}
+						}, fail);
 					});
 				};
 				window.parent.postMessage({ready: 'iframe'}, '*');
 			} else {
-				let suites = suiteKeys.map(key => new Suite(key));
-				let template = Matsui.template.fromElement(document.querySelector('#test-runner-template'));
+				addEventListener('load', e => {
+					let suites = suiteKeys.map(key => new Suite(key));
+					let template = Matsui.template.fromElement(document.querySelector('#test-runner-template'));
 
-				document.body.innerHTML = '';
-				let render = Matsui.show(document.body, renderData, template);
-				renderData = render.data();
+					document.body.innerHTML = '';
+					let render = Matsui.show(document.body, renderData, template);
+					renderData = render.data();
+					
+					let iframeRunner = document.getElementById('iframe-runner');
 				
-				let iframeRunner = document.getElementById('iframe-runner');
-			
-				let currentSuiteIndex = 0, currentTestIndex = 0;
-				function runNextTest() {
-					let suite = suites[currentSuiteIndex];
-					while (suite && currentTestIndex >= suite.tests.length) {
-						suite = suites[++currentSuiteIndex];
+					let currentSuiteIndex = 0, currentTestIndex = 0;
+					function runNextTest() {
+						let suite = suites[currentSuiteIndex];
+						while (suite && currentTestIndex >= suite.tests.length) {
+							suite = suites[++currentSuiteIndex];
+							currentTestIndex = 0;
+						}
+						
+						if (!suite) return done();
+						renderData.message = suite.name;
+
+						// (re)loads the iframe, so we get a new "ready" and send it the test details
+						iframeRunner.src = location.href;
 					}
-					
-					if (!suite) return done();
-					
-					iframeRunner.src = location.href;
-				}
-			
-				window.onmessage = event => {
-					let suite = suites[currentSuiteIndex];
-					let test = suite && suite.tests[currentTestIndex];
+				
+					window.onmessage = event => {
+						let data = event.data;
+						let suite = suites[('suite' in data) ? suiteKeys.indexOf(data.suite) : currentSuiteIndex];
+						let test = suite && suite.tests[('test' in data) ? data.test : currentTestIndex];
 
-					let data = event.data;
-					if (data.ready == 'iframe') {
-						test.status.iframe = "running";
-						iframeRunner.contentWindow.postMessage({suite: suite.name, test: currentTestIndex}, '*');
-					} else if (data.fail) {
-						test.status.iframe = "failed";
-						test.message = data.fail;
-						fail(data.fail);
-					} else if (data.pass) {
-						test.status.iframe = "passed";
+						if (data.ready == 'iframe') {
+							test.status.iframe = "running";
+							iframeRunner.contentWindow.postMessage({suite: suite.name, test: currentTestIndex}, '*');
+						} else if (data.fail) {
+							test.status.iframe = "failed";
+							test.message = data.fail;
+							fail(data.fail);
+							currentSuiteIndex = suites.length;
+							renderData.message = data.fail;
+						} else if (data.pass) {
+							test.status.iframe = "passed";
 
-						++currentTestIndex;
-						runNextTest();
-					}
-				};
-
-				let suitesLoaded = 0;
-				suites.forEach(suite => {
-					suite.load(onload => {
-						if (++suitesLoaded == suites.length) {
-							console.log(renderData.message = "all suites loaded");
-
-							renderData.suites = suites;
-							suites = renderData.suites; // gets a wrapped/monitored version
-
+							++currentTestIndex;
 							runNextTest();
 						}
+					};
+
+					let suitesLoaded = 0;
+					suites.forEach(suite => {
+						suite.load(onload => {
+							if (++suitesLoaded == suites.length) {
+								renderData.message = "all suites loaded";
+
+								renderData.suites = suites;
+								suites = renderData.suites; // gets a wrapped/monitored version
+
+								runNextTest();
+							}
+						});
 					});
 				});
 			}
 		</script>
+
+		<script>
+			function mapStatus(status) {
+				return {
+					waiting: ' ',
+					running: '➡️',
+					passed: '✅',
+					failed: '❌',
+				}[status] || status;
+			}
+		</script>
+		<template id="test-runner-template">
+			<div id="message-container">
+				<iframe id="iframe-runner"></iframe>
+				<div id="message">{{message}}</div>
+			</div>
+			
+			<template>
+				<template>
+					<tr class="header">
+						<th>{{name}}</th>
+						<td>{{=> data.tests.length}} tests</td>
+					</tr>
+					<tr class="test-list">
+						<td></td>
+						<td>
+							<template>
+								<template>
+									{{name}}: {{status}} : {{message}}
+								</template>
+
+								<table class="tests">
+									<thead>
+										<tr><th>iframe</th><th>name</th><th></th>
+									</thead>
+									<tbody>
+										<tr @items>
+											<td class="status">{{=> mapStatus(data.status.iframe)}}</td>
+											<td class="name">{{name}}</td>
+											<td>{{message}}</td>
+										</tr>
+									</tbody>
+								</table>
+							</template>
+							{{tests}}
+						</td>
+					</div>
+				</template>
+				<table class="suites">
+					<script @items>value</script>
+				</table>
+			</template>
+			{{suites}}
+
+			<style>
+				body {
+					font-family: sans-serif;
+					padding: 0;
+					margin: 0;
+					background: #FFF;
+				}
+			
+				#message-container {
+					width: 100%;
+					min-height: 2em;
+					border: 1px solid #888;
+					position: relative;
+				}
+				
+				#iframe-runner, #message {
+					position: absolute;
+					top: 0;
+					left: 0;
+					height: 100%;
+					width: 100%;
+					text-align: center;
+					border: none;
+					line-height: 1;
+					padding: 0.5em;
+					background-color: #EEE;
+					color: #666;
+					box-sizing: border-box;
+				}
+				#message {
+					position: relative;
+				}
+
+				.suites, .tests {
+					border-spacing: 0;
+				}
+				.suites th {
+					background: #006;
+					color: #FFF;
+				}
+				.suites td {
+					padding: 0;
+				}
+				.suites th, .suites .header td, .tests td {
+					padding: 0.3em 0.5em;
+				}
+				.tests td.status {
+					background: #DEF;
+					color: #000;
+					line-height: 1;
+					text-align: center;
+					min-width: 1em;
+				}
+				.tests td.name {
+					font-weight: bold;
+				}
+				.tests thead th {
+					background: transparent;
+					color: #888;
+					font-size: 0.65em;
+					padding: 0;
+					font-weight: normal;
+				}
+				.suite .header {
+					display: flex;
+					flex-direction: row;
+				}
+			</style>
+		</template>
 	</body>
 </html>
