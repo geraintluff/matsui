@@ -5,7 +5,7 @@ let Matsui = (() => {
 	/*--- JSON Patch Merge stuff ---*/
 
 	// Attach a hidden merge to data, which use later to decide what to re-render
-	let hiddenMergeMap = new WeakMap();
+	let hiddenMergeKey = Symbol();
 	let noChangeSymbol = Symbol('no change');
 
 	let merge = {
@@ -24,7 +24,7 @@ let Matsui = (() => {
 						return;
 					}
 					value[key] = merge.apply(value[key], childMerge, keepNulls);
-				} else if (childMerge != null) {
+				} else if (childMerge != null) { // deliberately matching both null/undefined
 					value[key] = childMerge;
 				}
 			});
@@ -111,20 +111,19 @@ let Matsui = (() => {
 		},
 		addHidden(data, mergeObj) {
 			if (!isObject(data)) return data;
-			let proxy = new Proxy(data, {
+			return new Proxy(data, {
 				get(obj, prop) {
+					if (prop == hiddenMergeKey) return mergeObj;
 					let value = Reflect.get(...arguments);
 					let hasChange = isObject(mergeObj) && (prop in mergeObj);
 					return merge.addHidden(value, hasChange ? mergeObj[prop] : noChangeSymbol);
 				}
 			});
-			hiddenMergeMap.set(proxy, mergeObj);
-			return proxy;
 		},
 		getHidden(data, noChange) {
-			let entry = hiddenMergeMap.get(data);
-			if (entry === noChangeSymbol) return noChange;
-			return (typeof entry == 'undefined') ? data : entry;
+			let mergeObj = data[hiddenMergeKey];
+			if (mergeObj === noChangeSymbol) return noChange;
+			return (typeof mergeObj == 'undefined') ? data : mergeObj;
 		}
 	};
 
@@ -137,23 +136,27 @@ let Matsui = (() => {
 	}
 	let access = {
 		tracked(data, trackerObj, trackerValue) {
+			if (!isObject(data)) {
+				addTrackerValue(trackerObj, trackerValue);
+				return data;
+			}
+			let isArray = Array.isArray(data);
 			let proxy = new Proxy(data, {
 				get(obj, prop) {
 					let value = Reflect.get(...arguments);
 					if (prop == pierceKey) {
 						addTrackerValue(trackerObj, trackerValue);
 						return data;
+					} else if (isArray && prop === 'length') {
+						addTrackerValue(trackerObj, trackerValue);
+						return value;
 					}
 					
 					if (!(prop in trackerObj)) trackerObj[prop] = {};
-					let subTracker = trackerObj[prop];
-					if (isObject(value)) {
-						return access.tracked(value, subTracker, trackerValue);
-					}
-					addTrackerValue(subTracker, trackerValue);
-					return value;
+					return access.tracked(value, trackerObj[prop], trackerValue);
 				},
 				ownKeys(obj) { // We're being asked to list our keys - assume this means they're interested in the whole object (including key addition and deletion)
+					addTrackerValue(trackerObj, trackerValue);
 					return Reflect.ownKeys(obj);
 				}
 			});
@@ -164,52 +167,48 @@ let Matsui = (() => {
 		},
 		values(trackerObj) {
 			return trackerObj[trackerSetKey];
+		},
+		combineUpdates(updateFunctions) {
+			let updateTriggers = {};
+			let firstRun = true;
+
+			return (data, mergeValue) => {
+				if (firstRun) { // run everything the first time
+					firstRun = false;
+					updateFunctions.forEach((fn, index) => {
+						let tracked = access.tracked(data, updateTriggers, index);
+						fn(tracked);
+					});
+					return;
+				}
+
+				// Collect all the updates (by index) referenced by the merge, removing them as we go
+				let updateSet = new Set();
+				function addUpdates(merge, triggers) {
+					if (merge === noChangeSymbol) return; // TODO: feels untidy that it's stealing this from the merge bit.  If we need this (why?) it should be one layer above anyway.
+					let updates = access.values(triggers);
+					if (updates) {
+						updates.forEach(index => updateSet.add(index));
+						updates.clear();
+					}
+					if (!isObject(merge)) return;
+					Object.keys(merge).forEach(key => {
+						if (Object.hasOwn(triggers, key)) addUpdates(merge[key], triggers[key]);
+					});
+				}
+				addUpdates(mergeValue, updateTriggers);
+
+				updateFunctions.forEach((fn, index) => {
+					if (updateSet.has(index)) {
+						let tracked = access.tracked(data, updateTriggers, index);
+						fn(tracked);
+					}
+				});
+			};
 		}
 	};
 
 	/*--- Core stuff ---*/
-
-	// Use the above two concepts to (1) keep a map of what each update function accesses, and (2) only call the update functions affected by the hidden merge
-	function combineUpdatesWithTracking(updateFunctions) {
-		let updateTriggers = {};
-		let firstRun = true;
-
-		return data => {
-			if (firstRun) { // first run - set up the trigger map and run all the updates
-				firstRun = false;
-				updateFunctions.forEach((fn, index) => {
-					let tracked = access.tracked(data, updateTriggers, index);
-					fn(tracked);
-				});
-				return;
-			}
-
-			let mergeValue = merge.getHidden(data, noChangeSymbol);
-
-			// Collect all the updates (by index) referenced by the merge, removing them as we go
-			let updateSet = new Set();
-			function addUpdates(merge, triggers) {
-				if (merge == noChangeSymbol) return;
-				let updates = access.values(triggers);
-				if (updates) {
-					updates.forEach(index => updateSet.add(index));
-					updates.clear();
-				}
-				if (!isObject(merge)) return;
-				Object.keys(merge).forEach(key => {
-					if (Object.hasOwn(triggers, key)) addUpdates(merge[key], triggers[key]);
-				});
-			}
-			addUpdates(mergeValue, updateTriggers);
-
-			updateFunctions.forEach((fn, index) => {
-				if (updateSet.has(index)) {
-					let tracked = access.tracked(data, updateTriggers, index);
-					fn(tracked);
-				}
-			});
-		};
-	}
 	
 	function SingleValueBind(endNode, template, innerTemplate) {
 		let currentTemplateUpdate;
@@ -222,7 +221,7 @@ let Matsui = (() => {
 				textNode = null;
 			}
 			currentTemplateUpdate = null;
-			while (endNode.previousSibling && endNode.previousSibling != prevNode) {
+			while (endNode.previousSibling && endNode.previousSibling !== prevNode) {
 				endNode.previousSibling.remove();
 			}
 		}
@@ -230,16 +229,17 @@ let Matsui = (() => {
 		this.update = data => {
 			if (isObject(data)) {
 				let untracked = access.pierce(data); // if this is being called from inside a DataTemplateBinding, terminate the access tracking here
+				let mergeValue = merge.getHidden(untracked, noChangeSymbol);
 
 				if (!currentTemplateUpdate) {
 					clear();
 
 					let bindingInfo = template(innerTemplate);
-					currentTemplateUpdate = combineUpdatesWithTracking(bindingInfo.updates);
-					currentTemplateUpdate(untracked);
+					currentTemplateUpdate = access.combineUpdates(bindingInfo.updates);
+					currentTemplateUpdate(untracked, mergeValue);
 					endNode.before(bindingInfo.node);
 				} else {
-					currentTemplateUpdate(untracked);
+					currentTemplateUpdate(untracked, mergeValue);
 				}
 			} else {
 				if (!textNode) {
@@ -281,7 +281,7 @@ let Matsui = (() => {
 			let untracked = access.pierce(data); // terminate any access tracking here (so we get notified for everything)
 			let mergeValue = merge.getHidden(untracked, noChangeSymbol); // and do our own filtering based on what's actually changed
 			// If the data is a non-null object or array, the merge must either be one too, or there's no change
-			if (mergeValue == noChangeSymbol) return;
+			if (mergeValue === noChangeSymbol) return;
 			
 			if (Array.isArray(untracked)) {
 				if (objectBinds) clear();
@@ -340,11 +340,8 @@ let Matsui = (() => {
 		};
 	}
 	
-	let specialAttributes = {
-		
-	};
-
 	/* scans a cloneable node tree, and adds setup functions to the nodeSetupList array */
+	let specialAttributes = {};
 	function scanElementTemplate(node, nodeSetupList, scopedTemplates, nodePath) {
 		if (!node.childNodes) return;
 		
@@ -357,13 +354,13 @@ let Matsui = (() => {
 		}
 		
 		let getFn = (expr, defaultArgs, defaultFn) => {
-			if (expr[0] == '>') expr = "(" + defaultArgs + ")=" + expr;
+			if (expr[0] === '>') expr = "(" + defaultArgs + ")=" + expr;
 			return expr ? (new Function('return ' + expr))() : defaultFn;
 		};
 
 		// TODO: collect and turn them into a single inline `<script>` at the top level
 		Array.from(node.childNodes).forEach(child => {
-			if (child.tagName == "SCRIPT" && child.hasAttribute("@setup")) {
+			if (child.tagName === "SCRIPT" && child.hasAttribute("@setup")) {
 				let runScript = new Function("data", child.textContent);
 				nodeSetupList.push((templateRoot, innerTemplate) => {
 					let contextNode = templateRoot;
@@ -376,7 +373,7 @@ let Matsui = (() => {
 
 		let newScopedTemplates = [];
 		Array.from(node.childNodes).forEach(child => {
-			if (child.tagName == 'TEMPLATE') {
+			if (child.tagName === 'TEMPLATE') {
 				newScopedTemplates.push(templateFromElement(child));
 				child.remove();
 			}
@@ -398,10 +395,10 @@ let Matsui = (() => {
 		for (let childIndex = 0; childIndex < node.childNodes.length; ++childIndex) {
 			let child = node.childNodes[childIndex];
 			
-			if (child.nodeType == 1) {
+			if (child.nodeType === 1) {
 				let childNodePath = nodePath.concat(childIndex);
 
-				if (child.tagName == "SCRIPT" && child.hasAttribute("@expr")) {
+				if (child.tagName === "SCRIPT" && child.hasAttribute("@expr")) {
 					let placeholder = document.createTextNode("");
 					child.replaceWith(placeholder);
 
@@ -416,7 +413,7 @@ let Matsui = (() => {
 						let bind = new SingleValueBind(endNode, scopedTemplate, innerTemplate);
 						return data => bind.update(valueFn(data));
 					});
-				} else if (child.tagName == "SCRIPT" && child.hasAttribute("@items")) {
+				} else if (child.tagName === "SCRIPT" && child.hasAttribute("@items")) {
 					let placeholder = document.createTextNode("");
 					child.replaceWith(placeholder);
 
@@ -456,9 +453,9 @@ let Matsui = (() => {
 				} else {
 					scanElementTemplate(child, nodeSetupList, scopedTemplates, childNodePath);
 				}
-			} else if (child.nodeType == 3) {
+			} else if (child.nodeType === 3) {
 				let parts = child.nodeValue.split(/\{\{((\}?[^\}])*)\}\}/); // {{prop}}
-				if (parts.length == 1) continue; // no template
+				if (parts.length === 1) continue; // no template
 
 				let nextChild = child.nextSibling;
 				let prefix = parts.shift();
@@ -482,7 +479,7 @@ let Matsui = (() => {
 					
 					endNode.nodeValue = "(pending)";
 					
-					if (prop[0] == '#') {
+					if (prop[0] === '#') {
 						let itemFn = getFn(prop.substr(1).trim(), 'key,value', (key, value) => value);
 
 						nodeSetupList.push((templateRoot, innerTemplate) => {
@@ -496,9 +493,9 @@ let Matsui = (() => {
 						});
 					} else {
 						let valueFn;
-						if (prop == "=") {
+						if (prop === "=") {
 							valueFn = (state => state);
-						} else if (prop[0] == '=') {
+						} else if (prop[0] === '=') {
 							valueFn = getFn(prop.substr(1).trim(), 'data', value => value);
 						} else {
 							valueFn = (state => state[prop]);
@@ -592,7 +589,7 @@ let Matsui = (() => {
 		let updateDisplay;
 		if (replaceHost) { // Replaces the host instead of adding to it - but it will now always use the template, never a basic value
 			let bindingInfo = template(innerTemplate || fallbackTemplate), bindingNode = bindingInfo.node;
-			if (host != bindingNode) host.replaceWith(bindingNode); // if the template was created from the host (so we're filling out an existing element), they could be the same
+			if (host !== bindingNode) host.replaceWith(bindingNode); // if the template was created from the host (so we're filling out an existing element), they could be the same
 			updateDisplay = combineUpdatesWithTracking(bindingInfo.updates);
 		} else {
 			let endNode = document.createTextNode("");
@@ -633,7 +630,7 @@ let Matsui = (() => {
 		// Make changes to the data
 		this.merge = mergeObj => {
 			let newData = merge.apply(data, mergeObj);
-			if (newData != data) setData(newData);
+			if (newData !== data) setData(newData);
 			notifyMerged(mergeObj);
 		};
 		this.replace = newData => {
@@ -665,7 +662,7 @@ let Matsui = (() => {
 				return templateFromElement(element);
 			},
 			fromElements: nodeListOrQuery => {
-				if (typeof nodeListOrQuery == 'string') nodeListOrQuery = document.querySelectorAll(nodeListOrQuery);
+				if (typeof nodeListOrQuery === 'string') nodeListOrQuery = document.querySelectorAll(nodeListOrQuery);
 				let list = [];
 				nodeListOrQuery.forEach(element => list.push(templateFromElement(element)));
 				return templateFromList(list);
@@ -690,12 +687,12 @@ let Matsui = (() => {
 		
 		// TODO: rename to .addTo() ?
 		show: (element, data, template, innerTemplate) => {
-			if (typeof element == 'string') element = document.querySelector(element);
-			if (typeof template != 'function') template = api.template.fromElements(template || 'template');
+			if (typeof element === 'string') element = document.querySelector(element);
+			if (typeof template !== 'function') template = api.template.fromElements(template || 'template');
 			return new TrackedDisplay(element, data, template, innerTemplate, false);
 		},
 		replace: (element, data, template, innerTemplate) => {
-			if (typeof element == 'string') element = document.querySelector(element);
+			if (typeof element === 'string') element = document.querySelector(element);
 			if (!template) template = api.template.fromElement(element);
 			return new TrackedDisplay(element, data, template, innerTemplate, true);
 		}

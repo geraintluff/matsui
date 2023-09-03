@@ -2,6 +2,7 @@
 <html>
 	<head>
 		<title>Matsui tests</title>
+		<!--<meta http-equiv="Content-Security-Policy" content="default-src 'self'">-->
 		<meta charset="utf8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 	</head>
@@ -9,7 +10,7 @@
 		<script src="../matsui.js"></script>
 		<script>
 			let api = Matsui;
-			let suiteKeys = ['access', 'merge', 'merge-tracked', 'merge-hidden'];
+			let suiteKeys = ['merge', 'merge-tracked', 'merge-hidden', 'access', 'access-combine'];
 		</script>
 
 		<script>
@@ -34,12 +35,13 @@
 					scriptMap.set(script, this);
 				};
 			}
-			function Test(name, runFn) {
+			function Test(name, runFn, options) {
 				if (!(this instanceof Test)) return new Test(name, runFn);
 				
 				this.name = name;
 				this.status = {iframe: "waiting"};
 				this.message = "";
+				this.options = options || {};
 				this.run = (pass, fail) => {
 					let timeout = setTimeout(() => fail("timeout"), 500);
 					let testFail = (m) => {
@@ -100,11 +102,21 @@
 			if (window.parent != window) {
 				window.onmessage = event => {
 					let data = event.data;
+
 					let suite = new Suite(data.suite);
 					failureObject.suite = data.suite;
 					failureObject.test = data.test;
 					suite.load(e => {
-						suite.tests[data.test].run(function pass(wait) {
+						let test = suite.tests[data.test];
+						
+						if (test.options.csp !== false) {
+							let meta = document.createElement('meta');
+							meta.setAttribute('http-equiv', "Content-Security-Policy");
+							meta.setAttribute('content', "default-src 'self'");
+							document.head.append(meta);
+						}
+
+						test.run(function pass(wait) {
 							if (wait) {
 								// lets us call .pass(true) at the start, and then .fail() afterwards before the pass is sent
 								setTimeout(() => pass(), 0);
@@ -222,9 +234,9 @@
 											<td>{{message}}</td>
 										</tr>
 									</tbody>
-									<tfoot>
+									<!--<tfoot>
 										<tr><th>iframe</th><th>name</th><th></th>
-									</tfoot>
+									</tfoot>-->
 								</table>
 							</template>
 							{{tests}}
@@ -270,12 +282,20 @@
 				#message {
 					position: relative;
 				}
+				
+				.suites {
+					width: 100%;
+					max-width: 600pt;
+					margin: auto;
+				}
 
 				.suites, .tests {
 					border-spacing: 0;
 				}
 				.suites th {
 					background: #006;
+					border-top-left-radius: 0.5em;
+					border-top-right-radius: 0.5em;
 					color: #FFF;
 				}
 				.suites td {
@@ -304,6 +324,9 @@
 				.suite .header {
 					display: flex;
 					flex-direction: row;
+				}
+				.suites .header > td {
+					border-bottom: 2px solid #006;
 				}
 			</style>
 		</template>

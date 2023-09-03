@@ -11,6 +11,7 @@ Test("tracking property access", (api, pass, fail, assert) => {
 	let tracked2 = api.access.tracked(data, tracker, "tracked2");
 	assert(tracked2.foo === 'bar');
 	assert(tracked2.baz[0] === 'bing');
+	tracked2.baz[0]; // read it a second time, to make sure there aren't duplicate entries
 	
 	assert.deepEqual(Object.keys(tracker).sort(), ['baz', 'foo']);
 
@@ -30,7 +31,7 @@ Test("tracking property access", (api, pass, fail, assert) => {
 	pass();
 });
 
-Test("piercing gets original", (api, pass, fail, assert) => {
+Test("piercing gets original object", (api, pass, fail, assert) => {
 	let data = {
 		foo: 'bar',
 		baz: ['bing']
