@@ -96,7 +96,7 @@
 				resultContainer.innerHTML = obj.html;
 				// Execute JS
 				let vars = Object.keys(obj.vars || {});
-				let fn = Function.apply(null, vars.concat(obj.js));
+				let fn = Function.apply(null, vars.concat(obj.js + '\n' + (obj.extraJs || '')));
 				let values = vars.map(name => {
 					let value = obj.vars[name];
 					if (typeof value === 'string') return resultContainer.querySelector(value);
@@ -108,6 +108,22 @@
 		</script>
 	</head>
 	<body>
+		<script>
+			if (0) {
+				let nodeObserver = new MutationObserver(records => {
+					records.forEach(record => {
+						if (record.type == "characterData") {
+							console.log("text:", record.target.nodeValue);
+						} else if (record.type == "attribute") {
+							console.log("attr:", record.attributeName, record.target.getAttribute(record.attributeName));
+						} else {
+							console.log("add", record.addedNodes, "remove", record.removedNodes);
+						}
+					});
+				});
+				nodeObserver.observe(document.body, {subtree: true, childList: true, characterData: true});
+			}
+		</script>
 		<header class="blog"></header>
 		<article class="main full">
 			<header>
@@ -124,8 +140,8 @@
 
 <div>
 	<div>Counter: {counter}</div>
-	<div>Next: \${data => data.counter + 1}</div>
-	<button @click="\${data => data.counter++}">
+	<div>Doubled: \${data => data.counter*2}</div>
+	<button $click="\${data => data.counter++}">
 		add
 	</button>
 </div>`,
@@ -203,6 +219,16 @@ let data = {
 	list: ["one", "two", "three"]
 };
 let render = Matsui.show(div, data, template);
+`,
+					extraJs: `
+data = render.data();
+setInterval(() => {
+	let index = Math.floor(Math.random()*data.list.length);
+	data.list[index] = data.list[index].replace(/[a-z]/ig, letter => {
+		if (Math.random() < 0.5) return letter.toUpperCase();
+		return letter.toLowerCase();
+	});
+}, 500);
 `,
 					vars: {
 						div: 'div',

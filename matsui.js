@@ -5,7 +5,7 @@ let Matsui = (() => {
 	/*--- JSON Patch Merge stuff ---*/
 
 	// Attach a hidden merge to data, which use later to decide what to re-render
-	let hiddenMergeKey = Symbol();
+	let hiddenMergeKey = Symbol(), hiddenMergePierceKey = Symbol();
 	let noChangeSymbol = Symbol('no change');
 
 	let merge = {
@@ -115,16 +115,26 @@ let Matsui = (() => {
 			return new Proxy(data, {
 				get(obj, prop) {
 					if (prop == hiddenMergeKey) return mergeObj;
+					if (prop == hiddenMergePierceKey) return obj;
 					let value = Reflect.get(...arguments);
 					let hasChange = isObject(mergeObj) && (prop in mergeObj);
 					return merge.addHidden(value, hasChange ? mergeObj[prop] : noChangeSymbol);
+				},
+				has(obj, prop) {
+					return (prop == hiddenMergeKey) || Reflect.has(obj, prop);
 				}
 			});
 		},
 		getHidden(data, noChange) {
+			if (!isObject(data)) return data;
 			let mergeObj = data[hiddenMergeKey];
+			if (typeof mergeObj == 'undefined') return data;
 			if (mergeObj === noChangeSymbol) return noChange;
-			return (typeof mergeObj == 'undefined') ? data : mergeObj;
+			return mergeObj;
+		},
+		withoutHidden(data) {
+			if (!isObject(data)) return data;
+			return data[hiddenMergePierceKey] || data;
 		}
 	};
 
@@ -190,6 +200,7 @@ let Matsui = (() => {
 			// Collect all the updates (by index) referenced by the merge, removing them as we go
 			let updateSet = new Set();
 			function addUpdates(merge, triggers) {
+				if (merge == noChangeSymbol) return;
 				let updates = access.trackedValues(triggers);
 				if (updates) {
 					updates.forEach(index => updateSet.add(index));
@@ -200,7 +211,7 @@ let Matsui = (() => {
 					if (Object.hasOwn(triggers, key)) addUpdates(merge[key], triggers[key]);
 				});
 			}
-			let mergeValue = merge.getHidden(data);
+			let mergeValue = merge.getHidden(data, noChangeSymbol /* re-use it because why not */);
 			addUpdates(mergeValue, updateTriggers);
 
 			updateFunctions.forEach((fn, index) => {
@@ -275,13 +286,15 @@ let Matsui = (() => {
 			return {
 				node: fragment,
 				updates: [data => {
-					data = access.pierce(data); // stop access-tracking here, so individual keys/items don't end up in the access-tracking map
+					data = access.pierce(data); // stop access-tracking here, so individual keys/items don't end up in the access-tracking map.  We're happy to be called more often because we use the hidden merge to do partial updates anyway
+					let mergeValue = merge.getHidden(data, noChangeSymbol);
 					
 					if (Array.isArray(data)) {
 						if (!updateList) {
 							clear();
 							updateList = [];
 						}
+						if (!mergeValue || mergeValue == noChangeSymbol) return;
 						
 						// remove old entries
 						while (updateList.length > data.length) {
@@ -297,7 +310,7 @@ let Matsui = (() => {
 						}
 						// update everything
 						updateList.forEach((update, index) => {
-							update(data[index]);
+							if (index in mergeValue) update(data[index]);
 						});
 					} else if (isObject(data)) {
 						throw Error("not implemented yet");
@@ -310,6 +323,7 @@ let Matsui = (() => {
 		fromElementPlaceholders(element, placeholderMap, placeholderRegex) {
 			let cloneable = element.content || element;
 			let setup = [];
+			let cacheLatestData = false;
 			
 			let expandPlaceholders = string => {
 				let contents = [];
@@ -332,6 +346,43 @@ let Matsui = (() => {
 			function walk(node, nodePath) {
 				if (node.childNodes) {
 					node.childNodes.forEach((child, index) => walk(child, nodePath.concat(index)));
+				}
+				if (node.attributes) {
+					for (let attr of node.attributes) {
+						if (attr.name[0] === '$') {
+							// TODO: register special handlers
+							let name = attr.name.substr(1);
+							let contents = expandPlaceholders(attr.value);
+
+							let getValue = data => {
+								let value = contents.map(entry => {
+									if (typeof entry === 'string') return entry;
+									return entry.value(data);
+								}).join("");
+							};
+							if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
+								getValue = (data, e) => {
+									return contents[1].value(data, e);
+								};
+							}
+							setup.push({
+								path: nodePath,
+								fn: (node, updates, innerTemplate, getData) => {
+									if (('on' + name) in node) {
+										cacheLatestData = true;
+										node.addEventListener(name, e => {
+											getValue(getData(), e);
+										});
+									} else {
+										updates.push(data => {
+											let value = getValue(data);
+											console.log(value);
+										});
+									}
+								}
+							});
+						}
+					}
 				}
 				if (node.nodeType == 3) { // text
 					let contents = expandPlaceholders(node.nodeValue);
@@ -374,10 +425,17 @@ let Matsui = (() => {
 					setup.path.forEach(i => subNode = subNode.childNodes[i]);
 					return subNode;
 				});
+				let latestData = null;
+				let getData = () => latestData;
 				let updates = [];
 				setup.forEach((obj, index) => {
-					obj.fn(subNodes[index], updates, innerTemplate);
+					obj.fn(subNodes[index], updates, innerTemplate, getData);
 				});
+				if (cacheLatestData) {
+					updates.unshift(data => {
+						latestData = merge.withoutHidden(access.pierce(data));
+					});
+				}
 				
 				return {
 					node: node,
@@ -417,6 +475,11 @@ let Matsui = (() => {
 			function walk(node) {
 				if (node.nodeType === 1) { // element
 					if (node.hasAttribute('@raw')) return;
+					for (let attr of node.attributes) {
+						if (attr.name[0] == '$') {
+							attr.value = replaceString(attr.value);
+						}
+					}
 				} else if (node.nodeType === 3) { // text
 					node.nodeValue = replaceString(node.nodeValue);
 				}
@@ -508,9 +571,10 @@ let Matsui = (() => {
 	}
 
 	function TrackedRender(data) {
+		let mergeTracked;
 		let updateFunctions = [];
 		let sendUpdate = mergeObj => {
-			let withMerge = merge.addHidden(data, mergeObj);
+			let withMerge = merge.addHidden(mergeTracked, mergeObj);
 			updateFunctions.forEach(fn => fn(withMerge));
 		};
 		// Register for merge updates
@@ -519,7 +583,6 @@ let Matsui = (() => {
 			return this;
 		};
 
-		let mergeTracked;
 		let setData = newData => {
 			data = newData;
 			mergeTracked = merge.trackedAsync(data, sendUpdate);
@@ -578,6 +641,8 @@ let Matsui = (() => {
 
 		wrap: data => new TrackedRender(data),
 		html: template.tagged, // for convenience
+		
+		data: value => new TrackedRender(data),
 		
 		// TODO: rename to .addTo() ?
 		show: (element, data, template, innerTemplate) => {
