@@ -393,8 +393,10 @@ let Matsui = (() => {
 				
 				let update = data => {
 					let newTemplate = this.getForData(data);
+					
+					// TODO: should this be sticky?
 					if (currentTemplate === newTemplate) {
-						return currentUpdates.forEach(fn => fn(data));
+						return currentUpdates(data);
 					}
 					// Clear the previous render
 					while (startNode.nextSibling && startNode.nextSibling != endNode) {
@@ -403,8 +405,8 @@ let Matsui = (() => {
 					currentTemplate = newTemplate;
 					
 					let binding = currentTemplate(innerTemplate || this.dynamic);
-					currentUpdates = binding.updates;
-					currentUpdates.forEach(fn => fn(data));
+					currentUpdates = combineUpdates(binding.updates);
+					currentUpdates(data);
 					startNode.after(binding.node);
 				};
 
@@ -421,6 +423,10 @@ let Matsui = (() => {
 		}
 
 		add(name, template, filter) {
+			if (typeof template !== 'function' && template) {
+				template = template.dynamic;
+			}
+			if (typeof template !== 'function') throw Error('Template not a function');
 			if (name) this.#map[name] = template;
 			if (filter) {
 				this.#filtered.unshift({
@@ -539,6 +545,9 @@ let Matsui = (() => {
 			let replaceString = text => text.replace(/((\$[a-z_-]+)*){([^\{\}]*)\}/ig, (all, prefixes, _, key) => {
 				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
 				let value = (data => isObject(data) ? data[key] : null);
+				if (key === '=') {
+					value = (data => data);
+				}
 				placeholderMap[placeholder] = {
 					template: templateFromIds(this, prefixes.split('$').slice(1)),
 					value: value
@@ -705,7 +714,7 @@ let Matsui = (() => {
 				templateSet = globalSet;
 			}
 			if (!templateSet) templateSet = globalSet;
-			if (!template) template = globalSet.fromElement(host);
+			if (!template) template = templateSet.fromElement(host);
 
 			let bindingInfo = template(templateSet.dynamic);
 			let updateDisplay = combineUpdates(bindingInfo.updates);

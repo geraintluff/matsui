@@ -367,34 +367,46 @@ let render = Matsui.replace(div, data);
 			</script>
 
 			<h3>The "dynamic" template</h3>
-			<p>Every template set (which is what <code>Matsui.global</code> is) has a <code>.dynamic</code> property.  This is a wrapper template which chooses which template to <em>actually</em> use based on template filters.</p>
+			<p>Every template set (which is what <code>Matsui.global</code> is) has a <code>.dynamic</code> property.  This is a wrapper template which chooses which template to <em>actually</em> use based on template filters, with newer ones having priority.</p>
 			<p>Every method that adds a named template has an optional <code>filter</code> argument, which maps <code>data</code> to a boolean saying whether the template can render that data.</p>
 			<script>
 				matsuiExample({
 					html: `
 <div>
-	{count}<br>
-	<button $click="\${d => d.count++}">
-		increment
+	<button $click="\${d => extendSequence(d)}">
+		add
 	</button>
+	<button $click="\${d => d.sequence = []}">
+		clear
+	</button>
+	<br>
+	$list$fizzbuzz{sequence}
 </div>`,
 					js: `
+window.extendSequence = data => {
+	let n = data.sequence.length + 1;
+	data.sequence.push(n);
+}
+
 // new set, falling back to global if needed
-let templates = Matsui.global.extend();
+let fizzbuzz = Matsui.global.extend();
 
 // add templates with filters (but no name)
-templates.addTag(null, d => !(d%15))\`
-	fizzbuzz
-\`;
-templates.addTag(null, d => !(d%3))\`
-	fizz
-\`;
-templates.addTag(null, d => !(d%5))\`
-	buzz
-\`;
+fizzbuzz.addTag(null, d => true)
+	\`$json{=}<br>\`;
+fizzbuzz.addTag(null, d => !(d%3))
+	\`fizz<br>\`;
+fizzbuzz.addTag(null, d => !(d%5))
+	\`buzz<br>\`;
+fizzbuzz.addTag(null, d => !(d%15))
+	\`fizzbuzz<br>\`;
+
+let templates = Matsui.global.extend();
+// $fizzbuzz will use \`fizzbuzz.dynamic\`
+templates.add("fizzbuzz", fizzbuzz);
 
 // Third argument can be a template set
-Matsui.replace(div, {count: 1}, templates);
+Matsui.replace(div, {sequence: []}, templates);
 `,
 					vars: {
 						div: 'div'
