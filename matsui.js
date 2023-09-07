@@ -105,6 +105,7 @@ let Matsui = (() => {
 				} else {
 					pendingMerge = mergeObj;
 					requestAnimationFrame(notifyPendingMerge);
+					clearTimeout(pendingMergeTimeout);
 					pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
 				}
 			});
@@ -165,409 +166,328 @@ let Matsui = (() => {
 		pierce(tracked) {
 			return (tracked && tracked[pierceKey]) || tracked;
 		},
-		values(trackerObj) {
+		trackedValues(trackerObj) {
 			return trackerObj[trackerSetKey];
-		},
-		combineUpdates(updateFunctions) {
-			let updateTriggers = {};
-			let firstRun = true;
+		}
+	};
+	
+	let combineUpdates = updateFunctions => {
+		let updateTriggers = {};
+		let firstRun = true;
 
-			return (data, mergeValue) => {
-				if (firstRun) { // run everything the first time
-					firstRun = false;
-					updateFunctions.forEach((fn, index) => {
-						let tracked = access.tracked(data, updateTriggers, index);
-						fn(tracked);
-					});
-					return;
-				}
-
-				// Collect all the updates (by index) referenced by the merge, removing them as we go
-				let updateSet = new Set();
-				function addUpdates(merge, triggers) {
-					if (merge === noChangeSymbol) return; // TODO: feels untidy that it's stealing this from the merge bit.  If we need this (why?) it should be one layer above anyway.
-					let updates = access.values(triggers);
-					if (updates) {
-						updates.forEach(index => updateSet.add(index));
-						updates.clear();
-					}
-					if (!isObject(merge)) return;
-					Object.keys(merge).forEach(key => {
-						if (Object.hasOwn(triggers, key)) addUpdates(merge[key], triggers[key]);
-					});
-				}
-				addUpdates(mergeValue, updateTriggers);
-
+		return data => {
+			data = access.pierce(data);
+			
+			if (firstRun) { // run everything the first time
+				firstRun = false;
 				updateFunctions.forEach((fn, index) => {
-					if (updateSet.has(index)) {
-						let tracked = access.tracked(data, updateTriggers, index);
-						fn(tracked);
-					}
+					let tracked = access.tracked(data, updateTriggers, index);
+					fn(tracked);
 				});
-			};
-		}
-	};
-
-	/*--- Core stuff ---*/
-	
-	function SingleValueBind(endNode, template, innerTemplate) {
-		let currentTemplateUpdate;
-
-		let textNode;
-		let prevNode = endNode.previousSibling;
-		function clear() { // removes any nodes that have been added
-			if (textNode) {
-				textNode.remove();
-				textNode = null;
+				return;
 			}
-			currentTemplateUpdate = null;
-			while (endNode.previousSibling && endNode.previousSibling !== prevNode) {
-				endNode.previousSibling.remove();
-			}
-		}
 
-		this.update = data => {
-			if (isObject(data)) {
-				let untracked = access.pierce(data); // if this is being called from inside a DataTemplateBinding, terminate the access tracking here
-				let mergeValue = merge.getHidden(untracked, noChangeSymbol);
-
-				if (!currentTemplateUpdate) {
-					clear();
-
-					let bindingInfo = template(innerTemplate);
-					currentTemplateUpdate = access.combineUpdates(bindingInfo.updates);
-					currentTemplateUpdate(untracked, mergeValue);
-					endNode.before(bindingInfo.node);
-				} else {
-					currentTemplateUpdate(untracked, mergeValue);
+			// Collect all the updates (by index) referenced by the merge, removing them as we go
+			let updateSet = new Set();
+			function addUpdates(merge, triggers) {
+				let updates = access.trackedValues(triggers);
+				if (updates) {
+					updates.forEach(index => updateSet.add(index));
+					updates.clear();
 				}
-			} else {
-				if (!textNode) {
-					clear();
-					textNode = document.createTextNode("");
-					endNode.before(textNode);
-				}
-				textNode.nodeValue = (data == null) ? "" : data;
-			}
-		};
-		this.replaceTemplate = (newTemplate, newInnerTemplate) => {
-			template = newTemplate;
-			if (newInnerTemplate) innerTemplate = newInnerTemplate;
-			clear();
-		};
-		this.remove = () => { // If we have several of these in a row, we'll want to remove just our own nodes.  Templates don't use this because they can just delete the whole tree
-			clear();
-			endNode.remove();
-		};
-	}
-
-	function CompositeValueBind(itemFn, endNode, template, innerTemplate) {
-		let arrayBinds = null, objectBinds = null;
-		
-		function clear() {
-			if (objectBinds) {
-				for (let key in objectBinds) {
-					objectBinds[key].remove();
-				}
-				objectBinds = null;
-			}
-			if (arrayBinds) {
-				arrayBinds.forEach(r => r.remove());
-				arrayBinds = null;
-			}
-		}
-
-		this.update = data => {
-			let untracked = access.pierce(data); // terminate any access tracking here (so we get notified for everything)
-			let mergeValue = merge.getHidden(untracked, noChangeSymbol); // and do our own filtering based on what's actually changed
-			// If the data is a non-null object or array, the merge must either be one too, or there's no change
-			if (mergeValue === noChangeSymbol) return;
-			
-			if (Array.isArray(untracked)) {
-				if (objectBinds) clear();
-				if (!arrayBinds) arrayBinds = [];
-
-				// Remove old bindings
-				while (arrayBinds.length > untracked.length) {
-					arrayBinds.pop().remove();
-				}
-				for (let i = 0; i < arrayBinds.length; ++i) {
-					// Update only the indices that are part of the merge
-					if (i in mergeValue) arrayBinds[i].update(itemFn(i, untracked[i]));
-				}
-				// Add bindings for new items
-				while (arrayBinds.length < untracked.length) {
-					let index = arrayBinds.length;
-					let itemEndNode = document.createTextNode("");
-					endNode.before(itemEndNode);
-					let bind = new SingleValueBind(itemEndNode, template, innerTemplate);
-					arrayBinds.push(bind);
-
-					let untrackedItem = itemFn(index, untracked[index]);
-					bind.update(untrackedItem);
-				}
-			} else if (isObject(data)) {
-				if (arrayBinds) clear();
-				if (!objectBinds) objectBinds = {};
-				// Remove old bindings
-				Object.keys(objectBinds).forEach(key => {
-					if (!Object.hasOwn(untracked, key)) {
-						objectBinds[key].remove();
-						delete objectBinds[key];
-					}
+				if (!isObject(merge)) return;
+				Object.keys(merge).forEach(key => {
+					if (Object.hasOwn(triggers, key)) addUpdates(merge[key], triggers[key]);
 				});
-				for (let key in untracked) {
-					// Add or update all bindings
-					if (!Object.hasOwn(objectBinds, key)) {
-						let itemEndNode = document.createTextNode("");
-						endNode.before(itemEndNode);
-						objectBinds[key] = new SingleValueBind(itemEndNode, template, innerTemplate);
-
-						let untrackedItem = itemFn(key, untracked[key]);
-						objectBinds[key].update(untrackedItem);
-					} else if (Object.hasOwn(mergeValue, key)) {
-						let untrackedItem = itemFn(key, untracked[key]);
-						objectBinds[key].update(untrackedItem);
-					}
-				}
-			} else {
-				clear(); // not an array or object, just don't render anything
 			}
-		};
-		this.remove = () => {
-			clear();
-			endNode.remove();
-		};
-	}
-	
-	/* scans a cloneable node tree, and adds setup functions to the nodeSetupList array */
-	let specialAttributes = {};
-	function scanElementTemplate(node, nodeSetupList, scopedTemplates, nodePath) {
-		if (!node.childNodes) return;
-		
-		if (node.hasAttribute) {
-			for (let key in specialAttributes) {
-				if (node.hasAttribute(key)) {
-					specialAttributes[key](node, )
+			let mergeValue = merge.getHidden(data);
+			addUpdates(mergeValue, updateTriggers);
+
+			updateFunctions.forEach((fn, index) => {
+				if (updateSet.has(index)) {
+					let tracked = access.tracked(data, updateTriggers, index);
+					fn(tracked);
 				}
-			}
-		}
-		
-		let getFn = (expr, defaultArgs, defaultFn) => {
-			if (expr[0] === '>') expr = "(" + defaultArgs + ")=" + expr;
-			return expr ? (new Function('return ' + expr))() : defaultFn;
-		};
-
-		// TODO: collect and turn them into a single inline `<script>` at the top level
-		Array.from(node.childNodes).forEach(child => {
-			if (child.tagName === "SCRIPT" && child.hasAttribute("@setup")) {
-				let runScript = new Function("data", child.textContent);
-				nodeSetupList.push((templateRoot, innerTemplate) => {
-					let contextNode = templateRoot;
-					nodePath.forEach(i => contextNode = contextNode.childNodes[i]);
-					return runScript.call(contextNode);
-				});
-				node.removeChild(child);
-			}
-		});
-
-		let newScopedTemplates = [];
-		Array.from(node.childNodes).forEach(child => {
-			if (child.tagName === 'TEMPLATE') {
-				newScopedTemplates.push(templateFromElement(child));
-				child.remove();
-			}
-		});
-		if (newScopedTemplates.length) {
-			scopedTemplates = newScopedTemplates.concat(scopedTemplates);
-		}
-		function getScopedTemplate(innerTemplate) {
-			if (!scopedTemplates.length) return innerTemplate;
-			return data => {
-				for (let i = 0; i < scopedTemplates.length; ++i) {
-					let template = scopedTemplates[i];
-					if (template.filter(data)) return template(data);
-				}
-				return innerTemplate(data);
-			};
-		}
-	
-		for (let childIndex = 0; childIndex < node.childNodes.length; ++childIndex) {
-			let child = node.childNodes[childIndex];
-			
-			if (child.nodeType === 1) {
-				let childNodePath = nodePath.concat(childIndex);
-
-				if (child.tagName === "SCRIPT" && child.hasAttribute("@expr")) {
-					let placeholder = document.createTextNode("");
-					child.replaceWith(placeholder);
-
-					let valueFn = new Function('data', "return " + child.textContent.trim());
-					let extraTemplates = scopedTemplates;
-					nodeSetupList.push((templateRoot, innerTemplate) => {
-						let scopedTemplate = getScopedTemplate(innerTemplate);
-
-						let endNode = templateRoot;
-						childNodePath.forEach(i => endNode = endNode.childNodes[i]);
-
-						let bind = new SingleValueBind(endNode, scopedTemplate, innerTemplate);
-						return data => bind.update(valueFn(data));
-					});
-				} else if (child.tagName === "SCRIPT" && child.hasAttribute("@items")) {
-					let placeholder = document.createTextNode("");
-					child.replaceWith(placeholder);
-
-					let itemFn = new Function('key', 'value', "return " + child.textContent.trim());
-					let extraTemplates = scopedTemplates;
-					nodeSetupList.push((templateRoot, innerTemplate) => {
-						let scopedTemplate = getScopedTemplate(innerTemplate);
-
-						let endNode = templateRoot;
-						childNodePath.forEach(i => endNode = endNode.childNodes[i]);
-
-						let bind = new CompositeValueBind(itemFn, endNode, scopedTemplate, innerTemplate);
-						return data => bind.update(data);
-					});
-				} else if (child.hasAttribute("@items")) { // turn this element into a template and use it for items (using this item expression)
-				// TODO: we only needed this because some elements (e.g. a table) would move text nodes, but we could replace with <script @items> instead
-
-					let itemFn = getFn(child.getAttribute("@items"), 'key,value', (key, value) => value);
-					
-					let placeholder = document.createTextNode("");
-					child.replaceWith(placeholder); // has same path
-					
-					child.removeAttribute("@items"); // just for neatness
-					let itemTemplate = templateFromElement(child);
-					nodeSetupList.push((templateRoot, innerTemplate) => {
-						// find our placeholder
-						let endNode = templateRoot;
-						childNodePath.forEach(i => endNode = endNode.childNodes[i]);
-
-						let scopedTemplate = getScopedTemplate(innerTemplate);
-						let scopedItemTemplate = nullButWeIgnoreIt => {
-							return itemTemplate(scopedTemplate);
-						}
-						let bind = new CompositeValueBind(itemFn, endNode, scopedItemTemplate, null);
-						return bind.update;
-					});
-				} else {
-					scanElementTemplate(child, nodeSetupList, scopedTemplates, childNodePath);
-				}
-			} else if (child.nodeType === 3) {
-				let parts = child.nodeValue.split(/\{\{((\}?[^\}])*)\}\}/); // {{prop}}
-				if (parts.length === 1) continue; // no template
-
-				let nextChild = child.nextSibling;
-				let prefix = parts.shift();
-				if (prefix) {
-					child.nodeValue = prefix;
-				} else {
-					node.removeChild(child);
-					--childIndex;
-				}
-				// childIndex is now the index before nextChild
-				
-				while (parts.length > 1) {
-					let prop = parts.shift().trim();
-					parts.shift(); // last inner match isn't useful to us
-					let suffix = parts.shift() || "";
-
-					let endNode = document.createTextNode("|"); // placeholder text node (not empty because in some edge-cases (cross-document stuff in IE11) it's removed by cloning)
-					node.insertBefore(endNode, nextChild);
-					++childIndex;
-					let endNodePath = nodePath.concat(childIndex);
-					
-					endNode.nodeValue = "(pending)";
-					
-					if (prop[0] === '#') {
-						let itemFn = getFn(prop.substr(1).trim(), 'key,value', (key, value) => value);
-
-						nodeSetupList.push((templateRoot, innerTemplate) => {
-							let scopedTemplate = getScopedTemplate(innerTemplate);
-
-							let endNode = templateRoot;
-							endNodePath.forEach(i => endNode = endNode.childNodes[i]);
-							endNode.nodeValue = suffix;
-							let bind = new CompositeValueBind(itemFn, endNode, scopedTemplate, innerTemplate);
-							return bind.update;
-						});
-					} else {
-						let valueFn;
-						if (prop === "=") {
-							valueFn = (state => state);
-						} else if (prop[0] === '=') {
-							valueFn = getFn(prop.substr(1).trim(), 'data', value => value);
-						} else {
-							valueFn = (state => state[prop]);
-						}
-						let extraTemplates = scopedTemplates;
-						nodeSetupList.push((templateRoot, innerTemplate) => {
-							let scopedTemplate = getScopedTemplate(innerTemplate);
-
-							let endNode = templateRoot;
-							endNodePath.forEach(i => endNode = endNode.childNodes[i]);
-							endNode.nodeValue = suffix;
-							let bind = new SingleValueBind(endNode, scopedTemplate, innerTemplate);
-							return data => bind.update(valueFn(data));
-						});
-					}
-				}
-			} else {
-				scanElementTemplate(child, nodeSetupList, scopedTemplates, nodePath.concat(childIndex));
-			}
-		}
-	}
-	let templateCacheSymbol = Symbol();
-	let templateFromElement = element => {
-		if (element[templateCacheSymbol]) return element[templateCacheSymbol];
-		
-		let cloneable = element.content || element;
-		let setupFunctions;
-
-		let result = innerTemplate => {
-			if (!setupFunctions) { // Lazy parsing
-				scanElementTemplate(cloneable, setupFunctions = [], [], []);
-			}
-
-			// we use the original and store a clone for future use
-			let node = cloneable;
-			cloneable = cloneable.cloneNode(true);
-			
-			let updates = [];
-			setupFunctions.forEach(fn => {
-				let update = fn(node, innerTemplate);
-				if (update) updates.push(update);
 			});
-			return {node: node, updates: updates};
 		};
-		let filterExpr = element.getAttribute && element.getAttribute("@filter");
-		result.filter = new Function('data', 'return ' + (filterExpr || 'true'));
-		if (element.id) result.id = element.id;
-		return element[templateCacheSymbol] = result;
-	};
-	function templateFromHtmlDefault(html) {
-		let template = document.createElement("template");
-		template.innerHTML = html;
-		return templateFromElement(template);
 	}
-	let templateFromHtml = templateFromHtmlDefault;
+	/*--- Pre-supplied templates and template-construction methods ---*/
+	
+	function templateFromIds(ids) {
+		let result = (t => t(t)); // Functional programming, babeeeyy
+		while (ids.length) {
+			let outerId = ids.pop();
+			let outerTemplate = template[outerId]; // hack for now, until we have a template registry
+			//console.log(outerId, outerTemplate);
+			if (!outerTemplate) {
+				let element = document.getElementById(outerId);
+				if (element) outerTemplate = template.fromElement(element);
+			}
+			if (outerTemplate) {
+				let inner = result;
+				result = fallback => outerTemplate(_ => inner(fallback));
+			}
+		}
+		return result;
+	}
+	
+	// Arbitrarily-picked vendor-reserved Unicode points
+	let placeholderPrefix = '\uF74A', placeholderSuffix = '\uF74B';
+	// Shouldn't appear in text other than from here, so just stick an index between them
+	let placeholderRegex = /\uF74A[0-9]+\uF74B/ug;
+	let template = {
+		text(innerTemplate) {
+			let textNode = document.createTextNode("");
+			return {
+				node: textNode,
+				updates: [data => {
+					if (isObject(data)) data = JSON.stringify(data);
+					textNode.nodeValue = (data == null) ? "" : data;
+				}]
+			};
+		},
+		list(innerTemplate) {
+			let fragment = document.createDocumentFragment();
+			let separators = [document.createTextNode("")];
+			fragment.appendChild(separators[0]);
+			let updateList, updateObj;
 
-	let fallbackTemplate = templateFromHtml(`<template @filter="Array.isArray(data)"><details><summary>[{{=a=>a.length}} items]</summary><ol><li @items="(k,v)=>[v]">{{0}}</li></ol></details></template><template><details @items="(k,v)=>[k,v]" style="width:100%;box-sizing:border-box;font-size:0.8rem;line-height:1.2"><summary style="opacity:0.75;font-style:italic;cursor:pointer">{{0}}</summary><div style="margin-inline-start:2em;margin-inline-start:calc(min(4em,10%))">{{1}}</div></details></template>{{=}}`);
-	function templateFromList(list) {
-		return innerTemplate => {
-			let node = document.createDocumentFragment();
-			let endNode = document.createTextNode("");
-			node.append(endNode);
+			let pop = () => {
+				let before = separators[separators.length - 2];
+				let after = separators.pop();
+				while (before.nextSibling && before.nextSibling != after) {
+					before.nextSibling.remove();
+				}
+				after.remove();
+			}
+			let clear = () => {
+				while (separators.length > 1) pop();
+				updateList = null;
+				updateObj = null;
+			};
+			let addSeparator = () => {
+				let sep = document.createTextNode("");
+				separators[separators.length - 1].after(sep);
+				separators.push(sep);
+				return sep;
+			};
 			
-			let currentTemplate
-			let valueBinding = new SingleValueBind(endNode, fallbackTemplate, innerTemplate);
+			return {
+				node: fragment,
+				updates: [data => {
+					data = access.pierce(data); // stop access-tracking here, so individual keys/items don't end up in the access-tracking map
+					
+					if (Array.isArray(data)) {
+						if (!updateList) {
+							clear();
+							updateList = [];
+						}
+						
+						// remove old entries
+						while (updateList.length > data.length) {
+							pop();
+							updateList.pop();
+						}
+						// add new entries
+						while (updateList.length < data.length) {
+							let endSep = addSeparator();
+							let binding = innerTemplate(innerTemplate);
+							endSep.before(binding.node);
+							updateList.push(combineUpdates(binding.updates));
+						}
+						// update everything
+						updateList.forEach((update, index) => {
+							update(data[index]);
+						});
+					} else if (isObject(data)) {
+						throw Error("not implemented yet");
+					} else {
+						clear();
+					}
+				}]
+			};
+		},
+		fromElementPlaceholders(element, placeholderMap, placeholderRegex) {
+			let cloneable = element.content || element;
+			let setup = [];
+			
+			let expandPlaceholders = string => {
+				let contents = [];
+				let prevIndex = placeholderRegex.lastIndex = 0;
+				for (let match; match = placeholderRegex.exec(string);) {
+					// Add the string prefix/separator
+					contents.push(string.substr(prevIndex, match.index - prevIndex));
+					prevIndex = placeholderRegex.lastIndex;
+					
+					// Look the value up in the placeholder map
+					let entry = placeholderMap[match[0]];
+					contents.push(entry);
+				}
+				if (contents.length) {
+					contents.push(string.substr(prevIndex));
+					return contents;
+				}
+			};
+
+			function walk(node, nodePath) {
+				if (node.childNodes) {
+					node.childNodes.forEach((child, index) => walk(child, nodePath.concat(index)));
+				}
+				if (node.nodeType == 3) { // text
+					let contents = expandPlaceholders(node.nodeValue);
+					if (contents) {
+						setup.push({
+							path: nodePath,
+							fn: (node, updates, innerTemplate) => {
+								contents.forEach(entry => {
+									if (typeof entry === 'string') {
+										if (entry) node.before(entry);
+									} else {
+										let binding = entry.template(innerTemplate);
+										node.before(binding.node);
+										updates.push(data => {
+											let itemData;
+											try {
+												itemData = entry.value(data); // item is the mapping function
+											} catch (e) {
+												itemData = e.message;
+											}
+											binding.updates.forEach(fn => fn(itemData));
+										});
+									}
+								});
+								node.remove();
+							}
+						});
+					}
+				}
+			}
+			walk(cloneable, []);
+
+			return innerTemplate => {
+				let node = cloneable; // Use the original (and storing a clone) means it works for in-place templates as well
+				cloneable = cloneable.cloneNode(true);
+				
+				// find all the nodes first, before we mess with anything
+				let subNodes = setup.map(setup => {
+					let subNode = node;
+					setup.path.forEach(i => subNode = subNode.childNodes[i]);
+					return subNode;
+				});
+				let updates = [];
+				setup.forEach((obj, index) => {
+					obj.fn(subNodes[index], updates, innerTemplate);
+				});
+				
+				return {
+					node: node,
+					updates: updates
+				};
+			};
+		},
+		fromElement(element) {
+			let placeholderMap = {};
+			let placeholderIndex = 0;
+
+			let replaceString = text => text.replace(/((\$[a-z_-]+)*)(\$?)\{([^\{\}]*)\}/ig, (all, prefix, _, $, match) => {
+				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
+				let value = (data => isObject(data) ? data[match] : null);
+				if ($) {
+					// This doesn't work with CSP enabled, and could be confusing to debug either way, so to be helpful we attempt to catch it here
+					try {
+						value = Function('return (' + match + ')')();
+						if (typeof value !== 'function') {
+							console.error("Should be a function:", value);
+							value = '{' + JSON.stringify(value) + '}';
+						}
+					} catch (e) {
+						console.error(e, match);
+						return `{${e.message}}`;
+					}
+				} else if (match == '=') {
+					value = (data => data);
+				}
+				placeholderMap[placeholder] = {
+					template: templateFromIds(prefix.split('$').slice(1)),
+					value: value
+				};
+				return placeholder;
+			});
+			
+			function walk(node) {
+				if (node.nodeType === 1) { // element
+					if (node.hasAttribute('@raw')) return;
+				} else if (node.nodeType === 3) { // text
+					node.nodeValue = replaceString(node.nodeValue);
+				}
+				if (node.childNodes) {
+					node.childNodes.forEach(walk);
+				}
+			}
+			walk(element.content || element);
+			return template.fromElementPlaceholders(element, placeholderMap, placeholderRegex);
+		},
+		tagged(strings, ...values) {
+			let placeholderMap = {};
+			let placeholderIndex = 0;
+			
+			let replaceString = text => text.replace(/((\$[a-z_-]+)*){([^\{\}]*)\}/ig, (all, prefixes, _, key) => {
+				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
+				let value = (data => isObject(data) ? data[match] : null);
+				placeholderMap[placeholder] = {
+					template: templateFromIds(prefixes.split('$').slice(1)),
+					value: value
+				}
+				return placeholder;
+			});
+
+			let parts = [replaceString(strings[0])];
+			for (let i = 0; i < values.length; ++i) {
+				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
+				let entry = {
+					template: t => t(t),
+					value: values[i]
+				};
+				// Steal prefixes from the previous string
+				parts[parts.length - 1] = parts[parts.length - 1].replace(/(\$[a-z_-]+)*$/, prefixes => {
+					entry.template = templateFromIds(prefixes.split('$').slice(1));
+					return "";
+				});
+				placeholderMap[placeholder] = entry;
+				parts.push(placeholder);
+				
+				parts.push(replaceString(strings[i + 1]));
+			}
+			
+			let element = document.createElement('template');
+			element.innerHTML = parts.join("");
+			return template.fromElementPlaceholders(element, placeholderMap, placeholderRegex);
+		}
+	};
+
+	//------------------------------------------------------------------------
+	
+	let fallbackTemplate = template.text//templateFromHtml(`<template @filter="Array.isArray(data)"><details><summary>[{{=a=>a.length}} items]</summary><ol><li @items="(k,v)=>[v]">{{0}}</li></ol></details></template><template><details @items="(k,v)=>[k,v]" style="width:100%;box-sizing:border-box;font-size:0.8rem;line-height:1.2"><summary style="opacity:0.75;font-style:italic;cursor:pointer">{{0}}</summary><div style="margin-inline-start:2em;margin-inline-start:calc(min(4em,10%))">{{1}}</div></details></template>{{=}}`);
+	function templateFromList(list) {
+		let listTemplate = innerTemplate => {
+			let node = document.createDocumentFragment();
+			let startNode = document.createTextNode("");
+			let endNode = document.createTextNode("");
+			node.append(startNode, endNode);
+			
+			let currentTemplate, currentUpdates;
 			
 			function update(data) {
 				if (currentTemplate) {
 					if (!currentTemplate.filter || currentTemplate.filter(data)) { // still OK to render this data
-						return valueBinding.update(data);
+						return currentUpdates.forEach(fn => fn(data));
 					}
 				}
+				// Clear the previous render
+				while (startNode.nextSibling && startNode.nextSibling != endNode) {
+					startNode.nextSibling.remove();
+				}
+				
 				// Find a new template
 				currentTemplate = fallbackTemplate;
 				for (let i = 0; i < list.length; ++i) {
@@ -577,124 +497,102 @@ let Matsui = (() => {
 						break;
 					}
 				}
-				valueBinding.replaceTemplate(currentTemplate);
-				valueBinding.update(data);
+				let binding = currentTemplate(listTemplate);
+				startNode.after(binding.node);
+				currentUpdates = binding.updates;
 			}
 
 			return {node: node, updates: [update]};
-		}
+		};
+		return listTemplate;
 	}
 
-	function TrackedDisplay(host, data, template, innerTemplate, replaceHost) {
-		let updateDisplay;
-		if (replaceHost) { // Replaces the host instead of adding to it - but it will now always use the template, never a basic value
-			let bindingInfo = template(innerTemplate || fallbackTemplate), bindingNode = bindingInfo.node;
-			if (host !== bindingNode) host.replaceWith(bindingNode); // if the template was created from the host (so we're filling out an existing element), they could be the same
-			updateDisplay = combineUpdatesWithTracking(bindingInfo.updates);
-		} else {
-			let endNode = document.createTextNode("");
-			host.append(endNode); // happens before the bind so it can identify the start
-			let bind = new SingleValueBind(endNode, template, innerTemplate || fallbackTemplate);
-			updateDisplay = bind.update;
-		}
-
-		// Provide updates
+	function TrackedRender(data) {
 		let updateFunctions = [];
-		let updateAndNotify = mergeObj => {
-			updateFunctions.forEach(fn => fn(mergeObj));
+		let sendUpdate = mergeObj => {
+			let withMerge = merge.addHidden(data, mergeObj);
+			updateFunctions.forEach(fn => fn(withMerge));
 		};
+		// Register for merge updates
 		this.track = fn => {
 			updateFunctions.push(fn);
 			return this;
 		};
 
-		let tracked;
+		let mergeTracked;
 		let setData = newData => {
 			data = newData;
-			tracked = merge.trackedAsync(data, updateAndNotify);
+			mergeTracked = merge.trackedAsync(data, sendUpdate);
 		};
 		setData(data);
-		updateDisplay(tracked);
 		this.data = () => {
-			return tracked;
+			return mergeTracked;
 		};
-		
-		let notifyMerged = mergeObj => {
-			let withHiddenMerge = merge.addHidden(tracked, mergeObj);
-			updateDisplay(withHiddenMerge);
-		};
-		updateFunctions.push(notifyMerged);
-		// If you have already changed `data`, but want to tell us about it
-		this.notifyMerged = notifyMerged;
-
 		// Make changes to the data
 		this.merge = mergeObj => {
 			let newData = merge.apply(data, mergeObj);
 			if (newData !== data) setData(newData);
-			notifyMerged(mergeObj);
+			sendUpdate(mergeObj);
 		};
 		this.replace = newData => {
 			let mergeObj = newData;
 			if (replaceHost) {
 				mergeObj = merge.make(data, newData);
 			} else {
-				updateDisplay(null); // clears the render down to just a text node
+				updateDisplayWithMerge(null, null); // clears the render down to just a text node
 			}
 			setData(newData);
-			notifyMerged(mergeObj);
+			sendUpdate(mergeObj);
 		};
+		
+		function addBinding(host, template, innerTemplate) {
+			let bindingInfo = template(innerTemplate || fallbackTemplate);
+			let updateDisplay = combineUpdates(bindingInfo.updates);
+
+			// Update the display straight away
+			updateDisplay(mergeTracked, data);
+			// and update on future data as well
+			updateFunctions.push(updateDisplay);
+			
+			return bindingInfo.node;
+		}
+		this.addTo = (element, template, innerTemplate) => {
+			let node = addBinding(element, template, innerTemplate);
+			element.append(node);
+			return this;
+		}
+		this.replace = (element, template, innerTemplate) => {
+			let node = addBinding(element, template, innerTemplate);
+			if (element !== node) { // it might be filling out existing nodes in-place
+				host.replaceWith(node);
+			}
+			return this;
+		}
 	}
 	
 	let api = {
 		merge: merge,
 		access: access,
-		template: {
-			// If the templates have an extra `.filter()` function, they can decline to render the data.  This uses the first template which accepts the data (or has no `.filter()`).
-			fromList(list) {
-				return templateFromList(list);
-			},
+		combineUpdates: combineUpdates,
+		template: template,
 
-			// HTML templates
-			fromHtml(html) {
-				return templateFromHtml(html);
-			},
-			fromElement(element) {
-				return templateFromElement(element);
-			},
-			fromElements: nodeListOrQuery => {
-				if (typeof nodeListOrQuery === 'string') nodeListOrQuery = document.querySelectorAll(nodeListOrQuery);
-				let list = [];
-				nodeListOrQuery.forEach(element => list.push(templateFromElement(element)));
-				return templateFromList(list);
-			},
-			// Define your own HTML template format, from either HTML or DOM nodes (which might not be templates!)
-			setHtmlFormat(fromHtml, fromElement) {
-				templateFromHtml = fromHtml || templateFromHtmlDefault;
-				templateFromElement = fromElement || (element => {
-					let t = document.createElement('template');
-					t.content.appendChild(element);
-					return templateFromHtml(t.innerHTML);
-				});
-			},
-			
-			bind(endNode, template, innerTemplate) {
-				return new SingleValueBind(endNode, template, innerTemplate || template);
-			},
-			bindComposite(itemFunction, endNode, template, innerTemplate) {
-				return new CompositeValueBind(itemFunction, endNode, template, innerTemplate || template);
-			}
-		},
+		wrap: data => new TrackedRender(data),
+		html: template.tagged, // for convenience
 		
 		// TODO: rename to .addTo() ?
 		show: (element, data, template, innerTemplate) => {
 			if (typeof element === 'string') element = document.querySelector(element);
-			if (typeof template !== 'function') template = api.template.fromElements(template || 'template');
-			return new TrackedDisplay(element, data, template, innerTemplate, false);
+			if (typeof template !== 'function') template = api.oldTemplate.fromElements(template || 'template');
+			let render = new TrackedRender(data);
+			render.addTo(element, template, innerTemplate);
+			return render;
 		},
 		replace: (element, data, template, innerTemplate) => {
 			if (typeof element === 'string') element = document.querySelector(element);
 			if (!template) template = api.template.fromElement(element);
-			return new TrackedDisplay(element, data, template, innerTemplate, true);
+			let render = new TrackedRender(data);
+			render.replace(element, template, innerTemplate);
+			return render;
 		}
 	}
 	return api;

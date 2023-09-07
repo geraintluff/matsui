@@ -10,7 +10,7 @@
 		<script src="../matsui.js"></script>
 		<script>
 			let api = Matsui;
-			let suiteKeys = ['merge', 'merge-tracked', 'merge-hidden', 'access', 'access-combine'];
+			let suiteKeys = ['template', 'merge', 'merge-tracked', 'merge-hidden', 'access', 'access-combine'];
 		</script>
 
 		<script>
@@ -206,50 +206,41 @@
 				}[status] || status;
 			}
 		</script>
+		
+		<template id="test-template">
+			<table class="tests">
+				<tr>
+					<td class="status">${data => mapStatus(data.status.iframe)}</td>
+					<td class="name">{name}</td>
+					<td>{message}</td>
+				</tr>
+				<!--<tfoot>
+					<tr><th>iframe</th><th>name</th><th></th>
+				</tfoot>-->
+			</table>
+		</template>
+		<template id="suite-template">
+			<table class="suites">
+				<tr class="header">
+					<th>{name}</th>
+					<td>${data => data.tests.length} tests</td>
+				</tr>
+				<tr class="test-list">
+					<td></td>
+					<td>
+						$list$test-template{tests}
+					</td>
+				</tr>
+			</table>
+		</template>
 		<template id="test-runner-template">
 			<div id="message-container">
 				<iframe id="iframe-runner"></iframe>
-				<div id="message">{{message}}</div>
+				<div id="message">{message}</div>
 			</div>
+			$list$suite-template{suites}
 			
-			<template>
-				<template>
-					<tr class="header">
-						<th>{{name}}</th>
-						<td>{{=> data.tests.length}} tests</td>
-					</tr>
-					<tr class="test-list">
-						<td></td>
-						<td>
-							<template>
-								<template>
-									{{name}}: {{status}} : {{message}}
-								</template>
-
-								<table class="tests">
-									<tbody>
-										<tr @items>
-											<td class="status">{{=> mapStatus(data.status.iframe)}}</td>
-											<td class="name">{{name}}</td>
-											<td>{{message}}</td>
-										</tr>
-									</tbody>
-									<!--<tfoot>
-										<tr><th>iframe</th><th>name</th><th></th>
-									</tfoot>-->
-								</table>
-							</template>
-							{{tests}}
-						</td>
-					</div>
-				</template>
-				<table class="suites">
-					<script @items>value</script>
-				</table>
-			</template>
-			{{suites}}
-
-			<style>
+			<style @raw>
 				body {
 					font-family: sans-serif;
 					padding: 0;

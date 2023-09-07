@@ -61,59 +61,63 @@ Test("combining updates", (api, pass, fail, assert) => {
 		return result;
 	}
 
-	let combined = api.access.combineUpdates(updates);
-	combined(data, {bar: 5, bink: "BINK"}); // call with anything
+	let combined = api.combineUpdates(updates);
+	let updateWithMerge = mergeObj => {
+		let withMerge = api.merge.addHidden(data, mergeObj);
+		combined(withMerge);
+	};
+	updateWithMerge({bar: 5, bink: "BINK"}); // call with anything
 	assert.deepEqual(callCount(), [1, 1, 1, 1, 1, 1, 1, 1]);
 
 	for (let repeat = 0; repeat < 2; ++repeat) {
 		// accessing root, foo
-		combined(data, {
+		updateWithMerge({
 			foo: 'BAR'
 		});
 		assert.deepEqual(callCount(), [1, 1, 0, 0, 0, 0, 1, 0]);
 		
 		// same again: the leaf merge values aren't actually used, only the tree shape is what matters
-		combined(data, {
+		updateWithMerge({
 			foo: null
 		});
 		assert.deepEqual(callCount(), [1, 1, 0, 0, 0, 0, 1, 0]);
 		
 		// accessing root, baz, baz[0]
-		combined(data, {
+		updateWithMerge({
 			baz: {0: "BING"}
 		});
 		assert.deepEqual(callCount(), [0, 1, 1, 1, 1, 0, 1, 0]);
 		
 		// accessing root, baz, and a non-existent index of baz
-		combined(data, {
+		updateWithMerge({
 			baz: {4: "four"}
 		});
 		assert.deepEqual(callCount(), [0, 1, 0, 1, 1, 0, 1, 0]);
 
 		// accessing root, baz (by claiming to replace it)
-		combined(data, {
+		updateWithMerge({
 			baz: "BAZ"
 		});
 		assert.deepEqual(callCount(), [0, 1, 0, 1, 1, 0, 1, 0]);
 
 		// accessing root, baz (by claiming to delete it)
-		combined(data, {
+		updateWithMerge({
 			baz: null
 		});
 		assert.deepEqual(callCount(), [0, 1, 0, 1, 1, 0, 1, 0]);
 
 		// accessing root, and the non-existent property florp
-		combined(data, {
+		updateWithMerge({
 			florp: "FLORP"
 		});
 		assert.deepEqual(callCount(), [0, 1, 0, 0, 0, 1, 1, 0]);
 
 		// accessing just root, with no actual changes
-		combined(data, {});
+		updateWithMerge({});
 		assert.deepEqual(callCount(), [0, 1, 0, 0, 0, 0, 1, 0]);
-		combined(data, "mystery");
+		updateWithMerge("mystery");
 		assert.deepEqual(callCount(), [0, 1, 0, 0, 0, 0, 1, 0]);
-		combined(data, null);
+		updateWithMerge(null);
 		assert.deepEqual(callCount(), [0, 1, 0, 0, 0, 0, 1, 0]);
 	}
 	pass()

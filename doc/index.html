@@ -11,7 +11,7 @@
 		<script src="../matsui.js"></script>
 		
 		<style>
-			.example {
+			.example, article.full .example {
 				text-align: start;
 				border: 1px solid #BBB;
 				border-radius: 4px;
@@ -19,7 +19,7 @@
 				padding: 0;
 				box-shadow: none;
 				max-width: 300pt;
-				margin: auto;
+				margin: 0 auto 1.5rem auto;
 				position: relative;
 				z-index: 1;
 				box-sizing: border-box;
@@ -29,41 +29,81 @@
 					float: right;
 					clear: right;
 					margin-left: 0.8em;
+					margin-bottom: 1em;
 				}
 			}
-			.example .example-input {
-				padding: 0 0.5em;
+			.example figure {
+				text-align: start;
+				padding: 0.5em 0.5em;
+				margin: 0;
+				width: 100%;
+				max-width: 100%;
 			}
 			.example pre code {
 				font-size: 0.8em;
 			}
-			.example-result {
-				text-align: start;
-				background-color: #DDD8;
-				margin: 0;
+			.example-result, .example-js {
+				background-color: #DDD5;
 				padding: 0.5rem;
 				border-top: 1px solid #BBB;
+			}
+			.example-js {
+				background-color: #DEF8;
+			}
+			.example-result {
 				border-bottom-left-radius: 4px;
 				border-bottom-right-radius: 4px;
+			}
+			.example figure::before {
+				content: "label";
+				float: right;
+				font-size: 0.65em;
+				margin: 0;
+				margin-top: -0.3rem;
+				line-height: 1;
+				padding: 0;
+			}
+			.example figure.example-html::before {
+				content: "HTML";
+				color: #600;
+			}
+			.example figure.example-js::before {
+				content: "JS";
+				color: #008;
+			}
+			.example figure.example-result::before {
+				content: "result";
+				color: #060;
 			}
 		</style>
 
 		<template id="matsui-template">
-			<div class="example">
-				<figure class="example-input small"><pre class="language-html"><code>{{=> (data.html || '').trim() }}
-
-&lt;script>
-<script @expr>
-(data.js || '').split('\n').map(x => "\t" + x).join("\n")
-</script>
-&lt;script></code></pre></figure>
-				<figure class="example-result"></figure>
-			</div>
+			<figure class="example-html small"><pre class="language-html"><code>${data => (data.html || '').trim()}</code></pre></figure>
+			<figure class="example-js small"><pre class="language-javascript"><code>${data => (data.js || '').trim().split('\n').map(x => "\t" + x).join("\n")}
+			</code></pre><figcaption>{caption}</figcaption></figure>
+			<figure class="example-result"></figure>
 		</template>
 		<script>
+			let exampleTemplate = Matsui.template.fromElement(document.querySelector('#matsui-template'));
 			function matsuiExample(obj) {
-				let template = Matsui.template.fromElement(document.querySelector('#matsui-template'));
-				Matsui.replace(document.currentScript, obj, template);
+				let container = document.createElement('div');
+				container.className = "example";
+				document.currentScript.replaceWith(container);
+				Matsui.show(container, obj, exampleTemplate);
+				
+				// Show result HTML
+				let resultContainer = container.querySelector('.example-result');
+				resultContainer.innerHTML = obj.html;
+				// Execute JS
+				let vars = Object.keys(obj.vars || {});
+				let fn = Function.apply(null, vars.concat(obj.js));
+				let values = vars.map(name => {
+					let value = obj.vars[name];
+					if (typeof value === 'string') return resultContainer.querySelector(value);
+					return value(resultContainer);
+				});
+				
+				fn.apply(null, values)
 			};
 		</script>
 	</head>
@@ -71,11 +111,12 @@
 		<header class="blog"></header>
 		<article class="main full">
 			<header>
-				<h1>Matsui <img src="Ricky_Matsui.png" style="float:right;height:1.5em;width:1.5em;margin:-0.25em -0.25em -0.25em -1.25em;border-radius:5px"></h1>
+				<h1>Matsui</h1>
+				<img src="Ricky_Matsui.png" style="float:right;height:4rem;width:4rem;margin:-4.5rem 0.25em 0 0;border-radius:5px">
 				<p>Simple data-driven UIs</p>
 			</header>
 			
-			<p>There are already loads of JavaScript frameworks/libraries for interactive UIs or putting data on the screen - but the magic inside them feels unnervingly complex, so I made something simple enough for me to explain how it's implemented.</p>
+			<p>I wanted a framework/library for interactive UIs, but I'm uncomfortable with magic I don't understand, so I made something simple enough for me to explain how it's implemented.</p>
 
 			<script>
 				matsuiExample({
@@ -83,66 +124,147 @@
 
 <div>
 	<div>Counter: {counter}</div>
-	<div>Next: ${data => data.counter + 1}</div>
-	<button @click="${data => data.counter}">add</button>
+	<div>Next: \${data => data.counter + 1}</div>
+	<button @click="\${data => data.counter++}">
+		add
+	</button>
 </div>`,
-					js: `Matsui.inPlace(div, {counter: 0});`
+					js: `Matsui.replace(div, {counter: 0});`,
+					vars: {
+						div: 'div'
+					}
 				});
 			</script>
 
-			<h2>Goals</h2>
+			<h2>Overview</h2>
+
+			<h3>Principles</h3>
 			<ul>
-				<li>small &amp; simple implementation
+				<li>concise implementation
 				<li>only updates the page where needed
 				<li>plain JavaScript library (no compilation step)
+				<li>CSP (Content Security Policy) support
 			</ul>
 			
-			<h3>Data structure</h3>
-			<p>Data is "JSON-like", which means it's cycle-free, and you interact with it by changing values (rather than calling methods).</p>
-			<p><code>null</code> is equivalent to a value not existing, which means that all changes can be represented as JSON Patch Merge objects.  This is a simple structure which makes it easy to see which parts of the data have changed.</p>
-			<todo>diagram</todo>
+			<h3>Data & Templates</h3>
+			<p>The data is JSON-like, except <code>null</code> is equivalent to a value/property not existing.  You interact with it by directly changing values (rather than calling methods).</p>
+			<p>Templates are functions which produce a node and a list of update functions, each making DOM changes based on their single <code>data</code> argument.  You can write templates in a <code>{...}</code>-based syntax, or directly in JavaScript.</p>
 			
-			<h2>Stuff you provide</h2>
-			
-			<h3>Templates</h3>
-			<p>Templates are functions which product <dfn>binding info</dfn>, which is:</p>
+			<h3>Partial Updates</h3>
+			<p>Matsui uses various <code>Proxy</code>s to:</p>
 			<ul>
-				<li>a node (probably a <code>DocumentFragment</code>) ready to be added to the DOM
-				<li>a list of update functions, which update the node/tree when given a data value.
+				<li>generate a merge object for all changes made to the data</li>
+				<li>associate a "hidden merge" with data objects (which recurses appropriately through property access)</li>
+				<li>track how a data object is accessed</li>
 			</ul>
-			<p>There are helper methods to construct templates based on <code>&lt;template></code>s, but you can generate your own templates instead (e.g. if you don't like the default templating syntax 😉).
+			<p>When update functions are called, it keeps track of what parts of the data they use.  When the data is changed, a merge object is attached to the data, and it only calls update functions affected by the merge.</p>
+			
+			<h2>HTML Template Syntax</h2>
+			<p>Templates use <code>{...}</code> (property name) and <code>${...}</code> (expressions) inside strings.  The JavaScript expressions in <code>${...}</code> must evaluate to a function, taking data as their first argument.</p>
+
+			<script>
+				matsuiExample({
+					html: `
+<template id="greet">
+	<p>Hello {name}! 1+1=\${data => 1 + 1}</p>
+</template>
+
+<div></div>`,
+					js: `
+let template = Matsui.template.fromElement(greet);
+let data = {name: "you"};
+let render = Matsui.show(div, data, template);
+`,
+					vars: {
+						div: 'div',
+						greet: '#greet'
+					}
+				});
+			</script>
+			<h3>Named templates</h3>
+			<p>These values can be prefixed with a template identifier (e.g. <code>$list</code>) which specifies which template should be used to render that value:</p>
+			<script>
+				matsuiExample({
+					html: `
+<template id="item">
+	<li>{=}</li>
+</template>
+
+<template id="nums">
+	<ol>
+		$list$item{list}
+	</ol>
+</template>
+
+<div></div>`,
+					js: `
+let template = Matsui.template.fromElement(nums);
+let data = {
+	list: ["one", "two", "three"]
+};
+let render = Matsui.show(div, data, template);
+`,
+					vars: {
+						div: 'div',
+						myList: '#myList'
+					}
+				});
 			</script>
 
-			<h2>What the library gives you</h2>
-			<todo>add <code>.data()</code> for direct data manipulation?</todo>
-			<p>The main API methods (<code>Matsui.show()</code> and <code>Matsui.replace()</code>) render the data to the page using templates, provide <code>.merge()</code>/<code>.replace()</code> methods for you to change the data, and <code>.track()</code> so you can listen for changes made through the UI.  These are implemented using a few ingredients:</p>
-
-			<h3>Partial updates</h3>
-			<p>The main thing the library does it to take a list of update functions (provided by a template), and when the data changes, only call <em>some</em> of the update functions as needed.  This needs a few things to work:</p>
-			<h4>Access tracking</h4>
-			<p>It wraps the data in a <code>Proxy</code> object, which tracks which parts of data are accessed when calling each update function.  When a change happens, it looks at the corresponding merge object to decide which updates to call.</p>
-			<h4>Hidden merge objects</h4>
-			<p>To keep template code simple, the update functions always take a <code>data</code> argument.  However (using a <code>WeakMap</code> and another <code>Proxy</code> wrapper) we associate a merge object with each data object.</p>
-			<p>This means that when an update function hand over to another rendering method (passing in the same data, sub-data, or some new generated value), the library can check whether that actually needs to be called.</p>
-			<todo>Maybe expose <code>.changed()</code> on Matsui, in case you want to implement this yourself.</todo>
+			<h3>In-place templates</h3>
+			<p>When you make a template from an existing element, it returns the original node(s) the first time you use that template (and copies from then on).</code>
+			<p>This probably doesn't make a difference for <code>&lt;template></code>s, but it means if you fill an element out <em>using itself as a template</em>, you end up modifying the existing page's DOM nodes in-place.
 			
-			<h3>Change-tracking objects</h3>
-			<p>This wraps data in another <code>Proxy</code> which catches modifications to the data, and generates merge objects for those changes.  These changes are passed to an update function (individually and synchronously, or collating multiple changes and calling later).</p>
-			<p>This is used to update the UI when the data is changed, either through user interaction (as defined by a template) or from an external source.</p>
-			
-			<h3>Default rendering tools</h3>
-			<p>The library also provides some other useful things:</p>
-			<h4>Single-value binding</h4>
-			<p>This uses a marker node (usually an empty text node), and switches between rendering plain values (strings/numbers/etc.) as text, or objects/arrays using a template, placing its content directly before the marker node.</p>
-			<h4>Multi-value binding</h4>
-			<p>Using a similar end-marker node, this renders a list of single-value bindings, with values mapped from the (index, value) or (key, value) pairs of array/object values.</p>
+			<h3>CSP support</h3>
+			<p><a href="https://content-security-policy.com/">Content Security Policies</a> place extra restrictions on what gets run/displayed in a web-page.  This often includes banning <code>eval</code>/<code>Function()</code>, inline event handlers (<code>onclick="myFunc()"</code>) and inline <code>&lt;script></code> elements.</p>
+			<p>When this is active, we can't define templates using DOM nodes, but we can use the same syntax as a tagged template:</p>
+			<script>
+				matsuiExample({
+					html: `
+<div></div>`,
+					js: `
+let template = Matsui.html\`
+	<p>Hello {name}! 1+1=\${data => 1 + 1}</p>
+\`;
+let data = {name: "you"};
+let render = Matsui.show(div, data, template);
+`,
+					vars: {
+						div: 'div'
+					}
+				});
+			</script>
+			<p>
 
-			<h4>Template tools</h4>
-			<p>There are helper methods for creating various types of template, like:</p>
-			<ul>
-				<li>from <code>&lt;template></code>s, other elements, or raw HTML</li>
-				<li>from a list of templates (each with a <code>.filter()</code> method), using the first one which says it can render the given data.</li>
-			</ul>
+			<hr>
+			
+
+
+			<p>There are some basic templates included, and helper functions for making templates from HTML, <code>&lt;template></code>s or existing nodes - but you can also create your own:</p>
+
+			<script>
+				matsuiExample({
+					html: `<div></div>`,
+					js: `
+let textTemplate = function() {
+	let node = document.createTextNode("");
+	let updateFn = data => {
+		node.nodeValue = data;
+	};
+	return {
+		node: node,
+		updates: [updateFn]
+	};
+}
+
+Matsui.show(div, "Hello!", textTemplate);`,
+					vars: {
+						div: 'div'
+					},
+					caption: `This is exactly how <code>Matsui.template.text</code> works`
+				});
+			</script>
+
 		</article>
 	</body>
 </html>
