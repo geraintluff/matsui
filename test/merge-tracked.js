@@ -16,7 +16,7 @@ Test("plain values", (api, pass, fail, assert) => {
 		let tracked = api.merge.tracked(data);
 		assert(tracked == data, "data: " + (data ? data.toString() : data));
 
-		let tracked2 = api.merge.trackedAsync(data);
+		let tracked2 = api.merge.tracked(data, x => x, true);
 		assert(tracked2 == data, "data: " + (data ? data.toString() : data));
 	});
 	pass();
@@ -84,7 +84,7 @@ Test("asynchronous", (api, pass, fail, assert) => {
 		assert.deepEqual(dataCopy, data); // the changes represent the correct modification
 	}
 
-	let tracked = api.merge.trackedAsync(data, listener);
+	let tracked = api.merge.tracked(data, listener, true);
 	tracked.baz = "six";
 	tracked.foo.bar = "five";
 	tracked.foo.bing[1] = "one";

@@ -54,8 +54,31 @@ let Matsui = (() => {
 			if (canBeUndefined && Object.keys(mergeObj).length == 0) return;
 			return mergeObj;
 		},
-		tracked(data, updateFn) {
+		tracked(data, updateFn, asyncUpdates) {
 			if (!isObject(data)) return data;
+			
+			if (asyncUpdates) {
+				let actualUpdateFn = updateFn;
+				let pendingMerge = null, pendingMergeTimeout = null;
+				let notifyPendingMerge = () => {
+					clearTimeout(pendingMergeTimeout);
+					if (pendingMerge != null) {
+						actualUpdateFn(pendingMerge);
+						pendingMerge = null;
+					}
+				}
+				updateFn = mergeObj => {
+					if (pendingMerge) {
+						pendingMerge = merge.apply(pendingMerge, mergeObj, true); // keep nulls because they're meaningful
+					} else {
+						pendingMerge = mergeObj;
+						requestAnimationFrame(notifyPendingMerge);
+						clearTimeout(pendingMergeTimeout);
+						pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
+					}
+				};
+			}
+			
 			return new Proxy(data, {
 				get(obj, prop) {
 					let value = Reflect.get(...arguments);
@@ -86,27 +109,6 @@ let Matsui = (() => {
 						return true;
 					}
 					return false;
-				}
-			});
-		},
-		// collects multiple changes together
-		trackedAsync(data, updateFn) {
-			let pendingMerge = null, pendingMergeTimeout = null;
-			let notifyPendingMerge = () => {
-				clearTimeout(pendingMergeTimeout);
-				if (pendingMerge) {
-					updateFn(pendingMerge);
-					pendingMerge = null;
-				}
-			}
-			return merge.tracked(data, mergeObj => {
-				if (pendingMerge) {
-					pendingMerge = merge.apply(pendingMerge, mergeObj, true); // keep nulls because they're meaningful
-				} else {
-					pendingMerge = mergeObj;
-					requestAnimationFrame(notifyPendingMerge);
-					clearTimeout(pendingMergeTimeout);
-					pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
 				}
 			});
 		},
@@ -224,12 +226,11 @@ let Matsui = (() => {
 	}
 	/*--- Pre-supplied templates and template-construction methods ---*/
 	
-	function templateFromIds(ids) {
+	function templateFromIds(templateSet, ids) {
 		let result = (t => t(t)); // Functional programming, babeeeyy
 		while (ids.length) {
 			let outerId = ids.pop();
-			let outerTemplate = template[outerId]; // hack for now, until we have a template registry
-			//console.log(outerId, outerTemplate);
+			let outerTemplate = templateSet.getNamed(outerId);
 			if (!outerTemplate) {
 				let element = document.getElementById(outerId);
 				if (element) outerTemplate = template.fromElement(element);
@@ -246,208 +247,237 @@ let Matsui = (() => {
 	let placeholderPrefix = '\uF74A', placeholderSuffix = '\uF74B';
 	// Shouldn't appear in text other than from here, so just stick an index between them
 	let placeholderRegex = /\uF74A[0-9]+\uF74B/ug;
-	let template = {
-		text(innerTemplate) {
-			let textNode = document.createTextNode("");
-			return {
-				node: textNode,
-				updates: [data => {
-					if (isObject(data)) data = JSON.stringify(data);
-					textNode.nodeValue = (data == null) ? "" : data;
-				}]
-			};
-		},
-		list(innerTemplate) {
-			let fragment = document.createDocumentFragment();
-			let separators = [document.createTextNode("")];
-			fragment.appendChild(separators[0]);
-			let updateList, updateObj;
-
-			let pop = () => {
-				let before = separators[separators.length - 2];
-				let after = separators.pop();
-				while (before.nextSibling && before.nextSibling != after) {
-					before.nextSibling.remove();
-				}
-				after.remove();
+	function templateFromElementPlaceholders(element, placeholderMap) {
+		let cloneable = element.content || element;
+		let setup = [];
+		let cacheLatestData = false;
+		
+		let expandPlaceholders = string => {
+			let contents = [];
+			let prevIndex = placeholderRegex.lastIndex = 0;
+			for (let match; match = placeholderRegex.exec(string);) {
+				// Add the string prefix/separator
+				contents.push(string.substr(prevIndex, match.index - prevIndex));
+				prevIndex = placeholderRegex.lastIndex;
+				
+				// Look the value up in the placeholder map
+				let entry = placeholderMap[match[0]];
+				contents.push(entry);
 			}
-			let clear = () => {
-				while (separators.length > 1) pop();
-				updateList = null;
-				updateObj = null;
-			};
-			let addSeparator = () => {
-				let sep = document.createTextNode("");
-				separators[separators.length - 1].after(sep);
-				separators.push(sep);
-				return sep;
-			};
-			
-			return {
-				node: fragment,
-				updates: [data => {
-					data = access.pierce(data); // stop access-tracking here, so individual keys/items don't end up in the access-tracking map.  We're happy to be called more often because we use the hidden merge to do partial updates anyway
-					let mergeValue = merge.getHidden(data, noChangeSymbol);
-					
-					if (Array.isArray(data)) {
-						if (!updateList) {
-							clear();
-							updateList = [];
-						}
-						if (!mergeValue || mergeValue == noChangeSymbol) return;
-						
-						// remove old entries
-						while (updateList.length > data.length) {
-							pop();
-							updateList.pop();
-						}
-						// add new entries
-						while (updateList.length < data.length) {
-							let endSep = addSeparator();
-							let binding = innerTemplate(innerTemplate);
-							endSep.before(binding.node);
-							updateList.push(combineUpdates(binding.updates));
-						}
-						// update everything
-						updateList.forEach((update, index) => {
-							if (index in mergeValue) update(data[index]);
-						});
-					} else if (isObject(data)) {
-						throw Error("not implemented yet");
-					} else {
-						clear();
-					}
-				}]
-			};
-		},
-		fromElementPlaceholders(element, placeholderMap, placeholderRegex) {
-			let cloneable = element.content || element;
-			let setup = [];
-			let cacheLatestData = false;
-			
-			let expandPlaceholders = string => {
-				let contents = [];
-				let prevIndex = placeholderRegex.lastIndex = 0;
-				for (let match; match = placeholderRegex.exec(string);) {
-					// Add the string prefix/separator
-					contents.push(string.substr(prevIndex, match.index - prevIndex));
-					prevIndex = placeholderRegex.lastIndex;
-					
-					// Look the value up in the placeholder map
-					let entry = placeholderMap[match[0]];
-					contents.push(entry);
-				}
-				if (contents.length) {
-					contents.push(string.substr(prevIndex));
-					return contents;
-				}
-			};
+			if (contents.length) {
+				contents.push(string.substr(prevIndex));
+				return contents;
+			}
+		};
 
-			function walk(node, nodePath) {
-				if (node.childNodes) {
-					node.childNodes.forEach((child, index) => walk(child, nodePath.concat(index)));
-				}
-				if (node.attributes) {
-					for (let attr of node.attributes) {
-						if (attr.name[0] === '$') {
-							// TODO: register special handlers
-							let name = attr.name.substr(1);
-							let contents = expandPlaceholders(attr.value);
+		function walk(node, nodePath) {
+			if (node.childNodes) {
+				node.childNodes.forEach((child, index) => walk(child, nodePath.concat(index)));
+			}
+			if (node.attributes) {
+				for (let attr of node.attributes) {
+					if (attr.name[0] === '$') {
+						// TODO: register special handlers
+						let name = attr.name.substr(1);
+						let contents = expandPlaceholders(attr.value);
+						if (!contents) continue;
 
-							let getValue = data => {
-								let value = contents.map(entry => {
-									if (typeof entry === 'string') return entry;
-									return entry.value(data);
-								}).join("");
+						let getValue = data => {
+							return contents.map(entry => {
+								if (typeof entry === 'string') return entry;
+								return entry.value(data);
+							}).join("");
+						};
+						if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
+							getValue = (data, e) => {
+								return contents[1].value(data, e);
 							};
-							if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
-								getValue = (data, e) => {
-									return contents[1].value(data, e);
-								};
-							}
-							setup.push({
-								path: nodePath,
-								fn: (node, updates, innerTemplate, getData) => {
-									if (('on' + name) in node) {
-										cacheLatestData = true;
-										node.addEventListener(name, e => {
-											getValue(getData(), e);
-										});
-									} else {
-										updates.push(data => {
-											let value = getValue(data);
-											console.log(value);
-										});
-									}
-								}
-							});
 						}
-					}
-				}
-				if (node.nodeType == 3) { // text
-					let contents = expandPlaceholders(node.nodeValue);
-					if (contents) {
 						setup.push({
 							path: nodePath,
-							fn: (node, updates, innerTemplate) => {
-								contents.forEach(entry => {
-									if (typeof entry === 'string') {
-										if (entry) node.before(entry);
-									} else {
-										let binding = entry.template(innerTemplate);
-										node.before(binding.node);
-										updates.push(data => {
-											let itemData;
-											try {
-												itemData = entry.value(data); // item is the mapping function
-											} catch (e) {
-												itemData = e.message;
+							fn: (node, updates, innerTemplate, getData) => {
+								if (('on' + name) in node) {
+									cacheLatestData = true;
+									node.addEventListener(name, e => {
+										getValue(getData(), e);
+									});
+								} else {
+									updates.push(data => {
+										let value = getValue(data);
+										if (name in node) {
+											if (node[name] !== value) {
+												node[name] = value;
 											}
-											binding.updates.forEach(fn => fn(itemData));
-										});
-									}
-								});
-								node.remove();
+										} else {
+											node.setAttribute(name, value);
+										}
+									});
+								}
 							}
 						});
 					}
 				}
 			}
-			walk(cloneable, []);
-
-			return innerTemplate => {
-				let node = cloneable; // Use the original (and storing a clone) means it works for in-place templates as well
-				cloneable = cloneable.cloneNode(true);
-				
-				// find all the nodes first, before we mess with anything
-				let subNodes = setup.map(setup => {
-					let subNode = node;
-					setup.path.forEach(i => subNode = subNode.childNodes[i]);
-					return subNode;
-				});
-				let latestData = null;
-				let getData = () => latestData;
-				let updates = [];
-				setup.forEach((obj, index) => {
-					obj.fn(subNodes[index], updates, innerTemplate, getData);
-				});
-				if (cacheLatestData) {
-					updates.unshift(data => {
-						latestData = merge.withoutHidden(access.pierce(data));
+			if (node.nodeType == 3) { // text
+				let contents = expandPlaceholders(node.nodeValue);
+				if (contents) {
+					setup.push({
+						path: nodePath,
+						fn: (node, updates, innerTemplate) => {
+							contents.forEach(entry => {
+								if (typeof entry === 'string') {
+									if (entry) node.before(entry);
+								} else {
+									let binding = entry.template(innerTemplate);
+									node.before(binding.node);
+									updates.push(data => {
+										let itemData;
+										try {
+											itemData = entry.value(data); // item is the mapping function
+										} catch (e) {
+											itemData = e.message;
+										}
+										binding.updates.forEach(fn => fn(itemData));
+									});
+								}
+							});
+							node.remove();
+						}
 					});
 				}
-				
-				return {
-					node: node,
-					updates: updates
-				};
+			}
+		}
+		walk(cloneable, []);
+
+		return innerTemplate => {
+			let node = cloneable; // Use the original (and storing a clone) means it works for in-place templates as well
+			cloneable = cloneable.cloneNode(true);
+			
+			// find all the nodes first, before we mess with anything
+			let subNodes = setup.map(setup => {
+				let subNode = node;
+				setup.path.forEach(i => subNode = subNode.childNodes[i]);
+				return subNode;
+			});
+			let latestData = null;
+			let getData = () => latestData;
+			let updates = [];
+			setup.forEach((obj, index) => {
+				obj.fn(subNodes[index], updates, innerTemplate, getData);
+			});
+			if (cacheLatestData) {
+				updates.unshift(data => {
+					latestData = merge.withoutHidden(access.pierce(data));
+				});
+			}
+			
+			return {
+				node: node,
+				updates: updates
 			};
-		},
+		};
+	}
+
+	class TemplateSet {
+		constructor(parent) {
+			this.#parent = parent;
+
+			/* Switches between templates, based on the filtered list */
+			this.dynamic = innerTemplate => {
+				let node = document.createDocumentFragment();
+				let startNode = document.createTextNode("");
+				let endNode = document.createTextNode("");
+				node.append(startNode, endNode);
+				
+				let currentTemplate, currentUpdates;
+				
+				let update = data => {
+					let newTemplate = this.getForData(data);
+					if (currentTemplate === newTemplate) {
+						return currentUpdates.forEach(fn => fn(data));
+					}
+					// Clear the previous render
+					while (startNode.nextSibling && startNode.nextSibling != endNode) {
+						startNode.nextSibling.remove();
+					}
+					currentTemplate = newTemplate;
+					
+					let binding = currentTemplate(innerTemplate || this.dynamic);
+					currentUpdates = binding.updates;
+					currentUpdates.forEach(fn => fn(data));
+					startNode.after(binding.node);
+				};
+
+				return {node: node, updates: [update]};
+			}
+		}
+		
+		#parent;
+		#map = {};
+		#filtered = [];
+		
+		extend() {
+			return new TemplateSet(this);
+		}
+
+		add(name, template, filter) {
+			if (name) this.#map[name] = template;
+			if (filter) {
+				this.#filtered.unshift({
+					filter: filter,
+					fn: template
+				})
+			}
+			return this;
+		}
+		addElement(name, element, filter) {
+			return this.add(name, this.fromElement(element), filter);
+		}
+		addAll(list) {
+			if (!list) list = 'template';
+			if (typeof list === 'string') list = document.querySelectorAll(list);
+			list.forEach(child => {
+				let name = child.id || child.getAttribute('name');
+				if (child.tagName === 'TEMPLATE' && name) {
+					this.addElement(name, child);
+				}
+			});
+			return this;
+		}
+		addTag(name, filter) {
+			return (strings, ...values) => {
+				let template = this.fromTag(strings, ...values);
+				this.add(name, template, filter);
+			};
+		}
+
+		getNamed(name) {
+			if (this.#map[name]) return this.#map[name];
+			if (this.#parent) return this.#parent.getNamed(name);
+			console.error("Unknown template:", name);
+			return this.dynamic;
+		}
+		getForData(data) {
+			for (let i = 0; i < this.#filtered.length; ++i) {
+				let entry = this.#filtered[i];
+				if (entry.filter(data)) {
+					return entry.fn;
+				}
+			}
+			if (this.#parent) return this.#parent.getForData(data);
+			throw Error("No template for data");
+		}
+		
 		fromElement(element) {
+			if (typeof element === 'string') {
+				let el = document.querySelector(element);
+				if (!el) throw Error("Invalid element:" + element);
+				element = el;
+			}
 			let placeholderMap = {};
 			let placeholderIndex = 0;
 
-			let replaceString = text => text.replace(/((\$[a-z_-]+)*)(\$?)\{([^\{\}]*)\}/ig, (all, prefix, _, $, match) => {
+			let replaceString = (text, templateSet) => text.replace(/((\$[a-z_-]+)*)(\$?)\{([^\{\}]*)\}/ig, (all, prefix, _, $, match) => {
 				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
 				let value = (data => isObject(data) ? data[match] : null);
 				if ($) {
@@ -466,39 +496,51 @@ let Matsui = (() => {
 					value = (data => data);
 				}
 				placeholderMap[placeholder] = {
-					template: templateFromIds(prefix.split('$').slice(1)),
+					template: templateFromIds(templateSet, prefix.split('$').slice(1)),
 					value: value
 				};
 				return placeholder;
 			});
 			
-			function walk(node) {
+			function walk(node, templateSet) {
+				if (node.childNodes) {
+					let childSet = null;
+					// scan for sub-templates
+					node.childNodes.forEach(child => {
+						if (child.nodeType !== 1) return;
+						let name = child.id || child.getAttribute('name');
+						if (child.tagName === 'TEMPLATE' && name) {
+							if (!childSet) childSet = templateSet.extend();
+							childSet.addElement(name, child);
+						}
+					});
+					if (childSet) templateSet = childSet;
+					node.childNodes.forEach(child => walk(child, templateSet));
+				}
 				if (node.nodeType === 1) { // element
 					if (node.hasAttribute('@raw')) return;
 					for (let attr of node.attributes) {
 						if (attr.name[0] == '$') {
-							attr.value = replaceString(attr.value);
+							attr.value = replaceString(attr.value, templateSet);
 						}
 					}
 				} else if (node.nodeType === 3) { // text
-					node.nodeValue = replaceString(node.nodeValue);
-				}
-				if (node.childNodes) {
-					node.childNodes.forEach(walk);
+					node.nodeValue = replaceString(node.nodeValue, templateSet);
 				}
 			}
-			walk(element.content || element);
-			return template.fromElementPlaceholders(element, placeholderMap, placeholderRegex);
-		},
-		tagged(strings, ...values) {
+			walk(element.content || element, this);
+			return templateFromElementPlaceholders(element, placeholderMap);
+		}
+		
+		fromTag(strings, ...values) {
 			let placeholderMap = {};
 			let placeholderIndex = 0;
 			
 			let replaceString = text => text.replace(/((\$[a-z_-]+)*){([^\{\}]*)\}/ig, (all, prefixes, _, key) => {
 				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
-				let value = (data => isObject(data) ? data[match] : null);
+				let value = (data => isObject(data) ? data[key] : null);
 				placeholderMap[placeholder] = {
-					template: templateFromIds(prefixes.split('$').slice(1)),
+					template: templateFromIds(this, prefixes.split('$').slice(1)),
 					value: value
 				}
 				return placeholder;
@@ -513,7 +555,7 @@ let Matsui = (() => {
 				};
 				// Steal prefixes from the previous string
 				parts[parts.length - 1] = parts[parts.length - 1].replace(/(\$[a-z_-]+)*$/, prefixes => {
-					entry.template = templateFromIds(prefixes.split('$').slice(1));
+					entry.template = templateFromIds(this, prefixes.split('$').slice(1));
 					return "";
 				});
 				placeholderMap[placeholder] = entry;
@@ -524,53 +566,99 @@ let Matsui = (() => {
 			
 			let element = document.createElement('template');
 			element.innerHTML = parts.join("");
-			return template.fromElementPlaceholders(element, placeholderMap, placeholderRegex);
+			return templateFromElementPlaceholders(element, placeholderMap, placeholderRegex);
 		}
-	};
-
-	//------------------------------------------------------------------------
-	
-	let fallbackTemplate = template.text//templateFromHtml(`<template @filter="Array.isArray(data)"><details><summary>[{{=a=>a.length}} items]</summary><ol><li @items="(k,v)=>[v]">{{0}}</li></ol></details></template><template><details @items="(k,v)=>[k,v]" style="width:100%;box-sizing:border-box;font-size:0.8rem;line-height:1.2"><summary style="opacity:0.75;font-style:italic;cursor:pointer">{{0}}</summary><div style="margin-inline-start:2em;margin-inline-start:calc(min(4em,10%))">{{1}}</div></details></template>{{=}}`);
-	function templateFromList(list) {
-		let listTemplate = innerTemplate => {
-			let node = document.createDocumentFragment();
-			let startNode = document.createTextNode("");
-			let endNode = document.createTextNode("");
-			node.append(startNode, endNode);
-			
-			let currentTemplate, currentUpdates;
-			
-			function update(data) {
-				if (currentTemplate) {
-					if (!currentTemplate.filter || currentTemplate.filter(data)) { // still OK to render this data
-						return currentUpdates.forEach(fn => fn(data));
-					}
-				}
-				// Clear the previous render
-				while (startNode.nextSibling && startNode.nextSibling != endNode) {
-					startNode.nextSibling.remove();
-				}
-				
-				// Find a new template
-				currentTemplate = fallbackTemplate;
-				for (let i = 0; i < list.length; ++i) {
-					let template = list[i];
-					if (!template.filter || template.filter(data)) {
-						currentTemplate = template;
-						break;
-					}
-				}
-				let binding = currentTemplate(listTemplate);
-				startNode.after(binding.node);
-				currentUpdates = binding.updates;
-			}
-
-			return {node: node, updates: [update]};
-		};
-		return listTemplate;
 	}
 
-	function TrackedRender(data) {
+	//------------------------------------------------------------------------
+		
+	/* Top-level stuff  */
+
+	let globalSet = new TemplateSet();
+	globalSet.add("json", innerTemplate => {
+		let textNode = document.createTextNode("");
+		return {
+			node: textNode,
+			updates: [data => {
+				textNode.nodeValue = JSON.stringify(data);
+			}]
+		};
+	}, data => true);
+	globalSet.add("text", innerTemplate => {
+		let textNode = document.createTextNode("");
+		return {
+			node: textNode,
+			updates: [data => {
+//				if (isObject(data)) data = JSON.stringify(data);
+				textNode.nodeValue = (data == null) ? "" : data;
+			}]
+		};
+	}, data => !isObject(data));
+	globalSet.add("list", innerTemplate => {
+		let fragment = document.createDocumentFragment();
+		let separators = [document.createTextNode("")];
+		fragment.appendChild(separators[0]);
+		let updateList, updateObj;
+
+		let pop = () => {
+			let before = separators[separators.length - 2];
+			let after = separators.pop();
+			while (before.nextSibling && before.nextSibling != after) {
+				before.nextSibling.remove();
+			}
+			after.remove();
+		}
+		let clear = () => {
+			while (separators.length > 1) pop();
+			updateList = null;
+			updateObj = null;
+		};
+		let addSeparator = () => {
+			let sep = document.createTextNode("");
+			separators[separators.length - 1].after(sep);
+			separators.push(sep);
+			return sep;
+		};
+		
+		return {
+			node: fragment,
+			updates: [data => {
+				data = access.pierce(data); // stop access-tracking here, so individual keys/items don't end up in the access-tracking map.  We're happy to be called more often because we use the hidden merge to do partial updates anyway
+				let mergeValue = merge.getHidden(data, noChangeSymbol);
+				
+				if (Array.isArray(data)) {
+					if (!updateList) {
+						clear();
+						updateList = [];
+					}
+					if (!mergeValue || mergeValue == noChangeSymbol) return;
+					
+					// remove old entries
+					while (updateList.length > data.length) {
+						pop();
+						updateList.pop();
+					}
+					// add new entries
+					while (updateList.length < data.length) {
+						let endSep = addSeparator();
+						let binding = innerTemplate(innerTemplate);
+						endSep.before(binding.node);
+						updateList.push(combineUpdates(binding.updates));
+					}
+					// update everything
+					updateList.forEach((update, index) => {
+						if (index in mergeValue) update(data[index]);
+					});
+				} else if (isObject(data)) {
+					throw Error("not implemented yet");
+				} else {
+					clear();
+				}
+			}]
+		};
+	});
+	
+	function TrackedRender(data, synchronous) {
 		let mergeTracked;
 		let updateFunctions = [];
 		let sendUpdate = mergeObj => {
@@ -585,7 +673,7 @@ let Matsui = (() => {
 
 		let setData = newData => {
 			data = newData;
-			mergeTracked = merge.trackedAsync(data, sendUpdate);
+			mergeTracked = merge.tracked(data, sendUpdate, !synchronous);
 		};
 		setData(data);
 		this.data = () => {
@@ -608,8 +696,18 @@ let Matsui = (() => {
 			sendUpdate(mergeObj);
 		};
 		
-		function addBinding(host, template, innerTemplate) {
-			let bindingInfo = template(innerTemplate || fallbackTemplate);
+		function addBinding(host, templateSet, template) {
+			if (typeof host === 'string') host = document.querySelector(host);
+			if (!host) throw Error("invalid host");
+			
+			if (typeof templateSet === 'function') {
+				template = templateSet;
+				templateSet = globalSet;
+			}
+			if (!templateSet) templateSet = globalSet;
+			if (!template) template = globalSet.fromElement(host);
+
+			let bindingInfo = template(templateSet.dynamic);
 			let updateDisplay = combineUpdates(bindingInfo.updates);
 
 			// Update the display straight away
@@ -619,13 +717,13 @@ let Matsui = (() => {
 			
 			return bindingInfo.node;
 		}
-		this.addTo = (element, template, innerTemplate) => {
-			let node = addBinding(element, template, innerTemplate);
+		this.addTo = (element, templateOrSet, template) => {
+			let node = addBinding(element, templateOrSet, template);
 			element.append(node);
 			return this;
 		}
-		this.replace = (element, template, innerTemplate) => {
-			let node = addBinding(element, template, innerTemplate);
+		this.replace = (element, templateOrSet, template) => {
+			let node = addBinding(element, templateOrSet, template);
 			if (element !== node) { // it might be filling out existing nodes in-place
 				host.replaceWith(node);
 			}
@@ -633,31 +731,19 @@ let Matsui = (() => {
 		}
 	}
 	
+
 	let api = {
 		merge: merge,
 		access: access,
 		combineUpdates: combineUpdates,
-		template: template,
 
+		global: globalSet,
 		wrap: data => new TrackedRender(data),
-		html: template.tagged, // for convenience
-		
-		data: value => new TrackedRender(data),
-		
-		// TODO: rename to .addTo() ?
-		show: (element, data, template, innerTemplate) => {
-			if (typeof element === 'string') element = document.querySelector(element);
-			if (typeof template !== 'function') template = api.oldTemplate.fromElements(template || 'template');
-			let render = new TrackedRender(data);
-			render.addTo(element, template, innerTemplate);
-			return render;
+		addTo: (element, data, template) => {
+			return api.wrap(data).addTo(element, template);
 		},
-		replace: (element, data, template, innerTemplate) => {
-			if (typeof element === 'string') element = document.querySelector(element);
-			if (!template) template = api.template.fromElement(element);
-			let render = new TrackedRender(data);
-			render.replace(element, template, innerTemplate);
-			return render;
+		replace: (element, data, template) => {
+			return api.wrap(data).replace(element, template);
 		}
 	}
 	return api;

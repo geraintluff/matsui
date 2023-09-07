@@ -18,12 +18,14 @@
 				background: #FFF;
 				padding: 0;
 				box-shadow: none;
-				max-width: 300pt;
+				width: calc(max(300pt, 50%));
+				max-width: 100%;
 				margin: 0 auto 1.5rem auto;
 				position: relative;
 				z-index: 1;
 				box-sizing: border-box;
 			}
+			/*
 			@media (min-width: 600pt) {
 				.example {
 					float: right;
@@ -32,6 +34,7 @@
 					margin-bottom: 1em;
 				}
 			}
+			*/
 			.example figure {
 				text-align: start;
 				padding: 0.5em 0.5em;
@@ -75,6 +78,9 @@
 				content: "result";
 				color: #060;
 			}
+			.clear {
+				clear: both;
+			}
 		</style>
 
 		<template id="matsui-template">
@@ -84,12 +90,12 @@
 			<figure class="example-result"></figure>
 		</template>
 		<script>
-			let exampleTemplate = Matsui.template.fromElement(document.querySelector('#matsui-template'));
+			let exampleTemplate = Matsui.global.fromElement('#matsui-template');
 			function matsuiExample(obj) {
 				let container = document.createElement('div');
 				container.className = "example";
 				document.currentScript.replaceWith(container);
-				Matsui.show(container, obj, exampleTemplate);
+				Matsui.addTo(container, obj, exampleTemplate);
 				
 				// Show result HTML
 				let resultContainer = container.querySelector('.example-result');
@@ -182,14 +188,15 @@
 				matsuiExample({
 					html: `
 <template id="greet">
-	<p>Hello {name}! 1+1=\${data => 1 + 1}</p>
+	<p>Hello {name}!</p>
+	<p>1 + 1 = \${data => 1 + 1}</p>
 </template>
 
 <div></div>`,
 					js: `
-let template = Matsui.template.fromElement(greet);
+let template = Matsui.global.fromElement(greet);
 let data = {name: "you"};
-let render = Matsui.show(div, data, template);
+let render = Matsui.addTo(div, data, template);
 `,
 					vars: {
 						div: 'div',
@@ -197,30 +204,114 @@ let render = Matsui.show(div, data, template);
 					}
 				});
 			</script>
+
+			<h3>In-place templates</h3>
+			<p>When you make a template from an existing element, it returns the original node(s) the first time you use that template (and copies from then on).</p>
+			<p>This probably doesn't make a difference for <code>&lt;template></code>s, but it means if you fill an element out <em>using itself as a template</em>, you end up modifying the existing page's DOM nodes in-place.</p>
+
+			<script>
+				matsuiExample({
+					html: `
+<div>Hello, {name}!</div>
+`,
+					js: `
+let render = Matsui.replace(div, {name: "you"});
+`,
+					vars: {
+						div: 'div'
+					}
+				});
+			</script>
+			
+			<h3>Attributes</h3>
+			<p>Attributes which start with <code>$</code> are treated as templated attributes.  The default implementation does one of the following:</p>
+			<ol>
+				<li>if an <code>on...="..."</code> property exists on the object, add an event handler which calls the associated function (with an additional event argument)</li>
+				<li>if a property is already defined on the element with that name (e.g. <code>value</code> for <code>&lt;input></code>s), update that property.</li>
+				<li>otherwise, set/update the corresponding attribute value</p>
+			</ol>
+			
+			<script>
+				matsuiExample({
+					html: `
+<div>
+	<button $click="\${data => data.counter++}">
+		increment
+	</button>
+	<input type="submit" $value="{counter}">
+	<img src="//missing" $alt="Alt: {counter}">
+</div>
+`,
+					js: `
+let render = Matsui.replace(div, {counter: 0});
+`,
+					vars: {
+						div: 'div',
+					}
+				});
+			</script>
+			<!--
+			<script>
+				matsuiExample({
+					html: `
+<div>
+	<input type="text"
+		$value="{text}"
+		$keyup="\${
+			(data, evt) => data.sync
+				&& (data.text = evt.target.value)
+		}">
+
+	<button $click="\${
+			data => data.sync = !data.sync
+		}">
+		\${data => data.sync ? "stop" : "sync"}
+	</button>
+	<button $click="\${data => data.text = 'X'}">
+		reset
+	</button>
+	<br>
+
+	<p>Text: <strong>{text}</strong></p>
+</div>`,
+					js: `
+let render = Matsui.replace(div, {
+	text: "hello",
+	sync: true
+});
+`,
+					vars: {
+						div: 'div',
+					}
+				});
+			</script>
+			-->
+			<p>However, you can also provide a handler for a particular <code>$...</code> attribute name, which might have more complex behaviour (such as setting up multiple event handlers, calling out to other methods).</p>
+
 			<h3>Named templates</h3>
 			<p>These values can be prefixed with a template identifier (e.g. <code>$list</code>) which specifies which template should be used to render that value:</p>
 			<script>
 				matsuiExample({
 					html: `
-<template id="item">
+<template name="named-item">
 	<li>{=}</li>
 </template>
 
-<template id="nums">
+<template id="named-list">
 	<ol>
-		$list$item{list}
+		$list$named-item{list}
 	</ol>
 </template>
 
-<div></div>`,
+<div>$named-list{=}</div>`,
 					js: `
-let template = Matsui.template.fromElement(nums);
+Matsui.global.addAll(); // scans the whole page
 let data = {
 	list: ["one", "two", "three"]
 };
-let render = Matsui.show(div, data, template);
+let render = Matsui.replace(div, data);
 `,
-					extraJs: `
+/*					extraJs: `
 data = render.data();
 setInterval(() => {
 	let index = Math.floor(Math.random()*data.list.length);
@@ -229,19 +320,16 @@ setInterval(() => {
 		return letter.toLowerCase();
 	});
 }, 500);
-`,
+`,*/
 					vars: {
-						div: 'div',
-						myList: '#myList'
+						div: 'div'
 					}
 				});
 			</script>
-
-			<h3>In-place templates</h3>
-			<p>When you make a template from an existing element, it returns the original node(s) the first time you use that template (and copies from then on).</code>
-			<p>This probably doesn't make a difference for <code>&lt;template></code>s, but it means if you fill an element out <em>using itself as a template</em>, you end up modifying the existing page's DOM nodes in-place.
+			<p>You can add named elements from <code>&lt;template></code>s with a <code>name</code> or <code>id</code> attribute, by using <code>.addAll(queryOrList)</code>.</p>
+			<p>You can add a named template from <em>any</em> element using <code>.addElement(name, ...)</code>.</p>
 			
-			<h3>CSP support</h3>
+			<h3>CSP support &amp; tagged templates</h3>
 			<p><a href="https://content-security-policy.com/">Content Security Policies</a> place extra restrictions on what gets run/displayed in a web-page.  This often includes banning <code>eval</code>/<code>Function()</code>, inline event handlers (<code>onclick="myFunc()"</code>) and inline <code>&lt;script></code> elements.</p>
 			<p>When this is active, we can't define templates using DOM nodes, but we can use the same syntax as a tagged template:</p>
 			<script>
@@ -249,48 +337,70 @@ setInterval(() => {
 					html: `
 <div></div>`,
 					js: `
-let template = Matsui.html\`
+let template = Matsui.global.fromTag\`
 	<p>Hello {name}! 1+1=\${data => 1 + 1}</p>
 \`;
 let data = {name: "you"};
-let render = Matsui.show(div, data, template);
+let render = Matsui.addTo(div, data, template);
 `,
 					vars: {
 						div: 'div'
 					}
 				});
 			</script>
-			<p>
-
-			<hr>
-			
-
-
-			<p>There are some basic templates included, and helper functions for making templates from HTML, <code>&lt;template></code>s or existing nodes - but you can also create your own:</p>
-
+			<p>To add these as named templates, you can use <code>.addTag(name)</code>:</p>
 			<script>
 				matsuiExample({
-					html: `<div></div>`,
+					html: `
+<div>$named-tag{=}</div>`,
 					js: `
-let textTemplate = function() {
-	let node = document.createTextNode("");
-	let updateFn = data => {
-		node.nodeValue = data;
-	};
-	return {
-		node: node,
-		updates: [updateFn]
-	};
-}
-
-Matsui.show(div, "Hello!", textTemplate);`,
+Matsui.global.addTag('named-tag')\`
+	<p>Hello {name}! 1+1=\${data => 1 + 1}</p>
+\`;
+let data = {name: "you"};
+let render = Matsui.replace(div, data);
+`,
 					vars: {
 						div: 'div'
-					},
-					caption: `This is exactly how <code>Matsui.template.text</code> works`
+					}
 				});
 			</script>
 
+			<h3>The "dynamic" template</h3>
+			<p>Every template set (which is what <code>Matsui.global</code> is) has a <code>.dynamic</code> property.  This is a wrapper template which chooses which template to <em>actually</em> use based on template filters.</p>
+			<p>Every method that adds a named template has an optional <code>filter</code> argument, which maps <code>data</code> to a boolean saying whether the template can render that data.</p>
+			<script>
+				matsuiExample({
+					html: `
+<div>
+	{count}<br>
+	<button $click="\${d => d.count++}">
+		increment
+	</button>
+</div>`,
+					js: `
+// new set, falling back to global if needed
+let templates = Matsui.global.extend();
+
+// add templates with filters (but no name)
+templates.addTag(null, d => !(d%15))\`
+	fizzbuzz
+\`;
+templates.addTag(null, d => !(d%3))\`
+	fizz
+\`;
+templates.addTag(null, d => !(d%5))\`
+	buzz
+\`;
+
+// Third argument can be a template set
+Matsui.replace(div, {count: 1}, templates);
+`,
+					vars: {
+						div: 'div'
+					}
+				});
+			</script>
 		</article>
 	</body>
 </html>
