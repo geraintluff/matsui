@@ -231,14 +231,8 @@ let Matsui = (() => {
 		while (ids.length) {
 			let outerId = ids.pop();
 			let outerTemplate = templateSet.getNamed(outerId);
-			if (!outerTemplate) {
-				let element = document.getElementById(outerId);
-				if (element) outerTemplate = template.fromElement(element);
-			}
-			if (outerTemplate) {
-				let inner = result;
-				result = fallback => outerTemplate(_ => inner(fallback));
-			}
+			let inner = result;
+			result = fallback => outerTemplate(_ => inner(fallback));
 		}
 		return result;
 	}
@@ -247,7 +241,7 @@ let Matsui = (() => {
 	let placeholderPrefix = '\uF74A', placeholderSuffix = '\uF74B';
 	// Shouldn't appear in text other than from here, so just stick an index between them
 	let placeholderRegex = /\uF74A[0-9]+\uF74B/ug;
-	function templateFromElementPlaceholders(element, placeholderMap) {
+	function templateFromElementPlaceholders(element, placeholderMap, templateSet) {
 		let cloneable = element.content || element;
 		let setup = [];
 		let cacheLatestData = false;
@@ -282,10 +276,10 @@ let Matsui = (() => {
 						let contents = expandPlaceholders(attr.value);
 						if (!contents) continue;
 
-						let getValue = data => {
+						let getValue = (data, ...args) => {
 							return contents.map(entry => {
 								if (typeof entry === 'string') return entry;
-								return entry.value(data);
+								return entry.value(data, ...args);
 							}).join("");
 						};
 						if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
@@ -296,6 +290,18 @@ let Matsui = (() => {
 						setup.push({
 							path: nodePath,
 							fn: (node, updates, innerTemplate, getData) => {
+								if (name in templateSet.attributes) {
+									cacheLatestData = true; // can't be sure we don't need it
+									let valueFn = (...args) => {
+										return getValue(getData(), ...args);
+									};
+									let update = templateSet.attributes[name].call(node, node, valueFn);
+									if (typeof update === 'function') {
+										updates.push(update);
+									}
+									return;
+								}
+							
 								if (('on' + name) in node) {
 									cacheLatestData = true;
 									node.addEventListener(name, e => {
@@ -378,9 +384,13 @@ let Matsui = (() => {
 		};
 	}
 
+	let templateCache = Symbol();
 	class TemplateSet {
+		attributes = {};
+	
 		constructor(parent) {
 			this.#parent = parent;
+			if (parent) this.attributes = Object.create(parent.attributes);
 
 			/* Switches between templates, based on the filtered list */
 			this.dynamic = innerTemplate => {
@@ -390,20 +400,18 @@ let Matsui = (() => {
 				node.append(startNode, endNode);
 				
 				let currentTemplate, currentUpdates;
+				let currentFilterObj = {};
 				
 				let update = data => {
-					let newTemplate = this.getForData(data);
-					
-					// TODO: should this be sticky?
-					if (currentTemplate === newTemplate) {
+					if (currentTemplate && currentFilterObj.filter(data)) {
 						return currentUpdates(data);
 					}
 					// Clear the previous render
 					while (startNode.nextSibling && startNode.nextSibling != endNode) {
 						startNode.nextSibling.remove();
 					}
-					currentTemplate = newTemplate;
-					
+
+					currentTemplate = this.getForData(data, currentFilterObj);
 					let binding = currentTemplate(innerTemplate || this.dynamic);
 					currentUpdates = combineUpdates(binding.updates);
 					currentUpdates(data);
@@ -421,7 +429,7 @@ let Matsui = (() => {
 		extend() {
 			return new TemplateSet(this);
 		}
-
+		
 		add(name, template, filter) {
 			if (typeof template !== 'function' && template) {
 				template = template.dynamic;
@@ -463,10 +471,11 @@ let Matsui = (() => {
 			console.error("Unknown template:", name);
 			return this.dynamic;
 		}
-		getForData(data) {
+		getForData(data, extraResults) {
 			for (let i = 0; i < this.#filtered.length; ++i) {
 				let entry = this.#filtered[i];
 				if (entry.filter(data)) {
+					if (extraResults) extraResults.filter = entry.filter;
 					return entry.fn;
 				}
 			}
@@ -480,6 +489,8 @@ let Matsui = (() => {
 				if (!el) throw Error("Invalid element:" + element);
 				element = el;
 			}
+			if (element[templateCache]) return element[templateCache];
+			
 			let placeholderMap = {};
 			let placeholderIndex = 0;
 
@@ -500,6 +511,8 @@ let Matsui = (() => {
 					}
 				} else if (match == '=') {
 					value = (data => data);
+				} else {
+					if (/\s/.test(match)) console.error("Suspicious template key:", match);
 				}
 				placeholderMap[placeholder] = {
 					template: templateFromIds(templateSet, prefix.split('$').slice(1)),
@@ -521,7 +534,6 @@ let Matsui = (() => {
 						}
 					});
 					if (childSet) templateSet = childSet;
-					node.childNodes.forEach(child => walk(child, templateSet));
 				}
 				if (node.nodeType === 1) { // element
 					if (node.hasAttribute('@raw')) return;
@@ -533,9 +545,12 @@ let Matsui = (() => {
 				} else if (node.nodeType === 3) { // text
 					node.nodeValue = replaceString(node.nodeValue, templateSet);
 				}
+				if (node.childNodes) {
+					node.childNodes.forEach(child => walk(child, templateSet));
+				}
 			}
 			walk(element.content || element, this);
-			return templateFromElementPlaceholders(element, placeholderMap);
+			return element[templateCache] = templateFromElementPlaceholders(element, placeholderMap, this);
 		}
 		
 		fromTag(strings, ...values) {
@@ -548,6 +563,7 @@ let Matsui = (() => {
 				if (key === '=') {
 					value = (data => data);
 				}
+				if (/\s/.test(key)) console.error("Suspicious template key:", key);
 				placeholderMap[placeholder] = {
 					template: templateFromIds(this, prefixes.split('$').slice(1)),
 					value: value
@@ -575,7 +591,7 @@ let Matsui = (() => {
 			
 			let element = document.createElement('template');
 			element.innerHTML = parts.join("");
-			return templateFromElementPlaceholders(element, placeholderMap, placeholderRegex);
+			return templateFromElementPlaceholders(element, placeholderMap, this);
 		}
 	}
 

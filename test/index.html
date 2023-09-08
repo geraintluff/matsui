@@ -132,10 +132,11 @@
 			} else {
 				addEventListener('load', e => {
 					let suites = suiteKeys.map(key => new Suite(key));
-					let template = Matsui.template.fromElement(document.querySelector('#test-runner-template'));
+					Matsui.global.addAll();
+					let template = Matsui.global.fromElement('#test-runner-template');
 
 					document.body.innerHTML = '';
-					let render = Matsui.show(document.body, renderData, template);
+					let render = Matsui.addTo(document.body, renderData, template);
 					renderData = render.data();
 					
 					let iframeRunner = document.getElementById('iframe-runner');

@@ -3,7 +3,8 @@ Test("template.text", (api, pass, fail, assert) => {
 		fail("inner template should not be called");
 	};
 	
-	let binding = api.template.text(errorTemplate);
+	let textTemplate = api.global.getNamed("text");
+	let binding = textTemplate(errorTemplate);
 	
 	assert(binding.node instanceof Text); // Should be a DOM text node
 	assert(Array.isArray(binding.updates));
@@ -41,7 +42,8 @@ Test("template.list", (api, pass, fail, assert) => {
 		};
 	};
 	
-	let binding = api.template.list(_ => itemTemplate(fallbackTemplate));
+	let listTemplate = api.global.getNamed("list");
+	let binding = listTemplate(_ => itemTemplate(fallbackTemplate));
 	let container = document.createElement('div');
 	container.append(binding.node);
 

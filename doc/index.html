@@ -286,8 +286,69 @@ let render = Matsui.replace(div, {
 				});
 			</script>
 			-->
-			<p>However, you can also provide a handler for a particular <code>$...</code> attribute name, which might have more complex behaviour (such as setting up multiple event handlers, calling out to other methods).</p>
+			<p>However, you can also provide a handler for a particular <code>$...</code> attribute name, which might have more complex behaviour.  Here, a single attribute:</p>
+			<ul>
+				<li>listens for mouse-clicks</li>
+				<li>listens for the <kbd>Enter</kbd> key</li>
+				<li>styles the cursor</li>
+				<li>makes the element tab-focusable</li>
+			</ul>
+			<script>
+				matsuiExample({
+					html: `
+<div>
+	<div $press="\${data => data.counter++}">
+		counter: {counter}<br>
+		updates: <span class="updates"></span>
+	</div>
+</div>
+`,
+					js: `
+let templateSet = Matsui.global;
+templateSet.attributes.press = (node, attrFn) => {
+	// add click and keyboard handlers
+	addEventHandlers(node, attrFn);
+	
+	// this lives as long as the template binding
+	let updateCount = 0;
 
+	// optional update function return
+	return data => {
+		// Access the data, so we get called again
+		Matsui.access.pierce(data);
+		node.querySelector(".updates")
+			.textContent = ++updateCount;
+	};
+};
+let render = Matsui.replace(div, {counter: 0});
+`,
+					extraJs: `
+function addEventHandlers(node, getValue) {
+	// mouse interaction
+	node.addEventListener('click', e => {
+		getValue(e);
+	});
+	node.style.cursor = "pointer";
+	node.style.userSelect = "none";
+	
+	// Keyboard interaction
+	node.setAttribute("tabindex", 0);
+	node.addEventListener('keydown', e => {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			e.stopPropagation();
+			getValue(e);
+		}
+	});
+};
+`,
+					vars: {
+						div: 'div',
+					}
+				});
+			</script>
+			<p>The second <code>attrFn</code> argument to our attribute handler evaluates the attribute expression.  Any extra arguments you pass in are included as extra arguments to the <code>${data => ...}</code> functions in the attribute's value.</p>
+			
 			<h3>Named templates</h3>
 			<p>These values can be prefixed with a template identifier (e.g. <code>$list</code>) which specifies which template should be used to render that value:</p>
 			<script>
@@ -330,7 +391,7 @@ setInterval(() => {
 			<p>You can add a named template from <em>any</em> element using <code>.addElement(name, ...)</code>.</p>
 			
 			<h3>CSP support &amp; tagged templates</h3>
-			<p><a href="https://content-security-policy.com/">Content Security Policies</a> place extra restrictions on what gets run/displayed in a web-page.  This often includes banning <code>eval</code>/<code>Function()</code>, inline event handlers (<code>onclick="myFunc()"</code>) and inline <code>&lt;script></code> elements.</p>
+			<p><a href="https://content-security-policy.com/">Content Security Policies</a> place extra restrictions on what gets run/displayed in a web-page.  This includes banning <code>eval</code>/<code>Function()</code>, inline event handlers (<code>onclick="myFunc()"</code>) and inline <code>&lt;script></code> elements.</p>
 			<p>When this is active, we can't define templates using DOM nodes, but we can use the same syntax as a tagged template:</p>
 			<script>
 				matsuiExample({
@@ -413,6 +474,7 @@ Matsui.replace(div, {sequence: []}, templates);
 					}
 				});
 			</script>
+			<p>However, it's worth noting that this <strong>template selection is sticky</strong>.  This means that if the previously-used template's filter still returns <code>true</code>, it will continue to be used - even if there are higher-priority templates which would also accept the data.</p>
 		</article>
 	</body>
 </html>
