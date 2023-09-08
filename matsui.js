@@ -234,6 +234,7 @@ let Matsui = (() => {
 			let inner = result;
 			result = fallback => outerTemplate(_ => inner(fallback));
 		}
+		result.ids = ids;
 		return result;
 	}
 	
@@ -266,15 +267,54 @@ let Matsui = (() => {
 
 		function walk(node, nodePath) {
 			if (node.childNodes) {
-				node.childNodes.forEach((child, index) => walk(child, nodePath.concat(index)));
+				node.childNodes.forEach((child, index) => {
+					if (child.tagName === 'TEMPLATE') {
+						let childTemplate = templateSet.fromElement(child);
+
+						for (let attr of child.attributes) {
+							if (attr.name[0] === '@') {
+								let name = attr.name.substr(1);
+								let contents = expandPlaceholders(attr.value) || [attr.value];
+							
+								let getValue = (data, ...args) => {
+									return contents.map(entry => {
+										if (typeof entry === 'string') return entry;
+										return entry.value(data, ...args);
+									}).join("");
+								};
+								if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
+									getValue = (data, e) => {
+										return contents[1].value(data, e);
+									};
+								}
+								
+								let directive = templateSet.directives[attr.name.substr(1)];
+								if (typeof directive !== 'function') throw Error("Unknown directive: " + attr.name);
+								childTemplate = directive(childTemplate, getValue, templateSet);
+							}
+						}
+
+						if (childTemplate) {
+							setup.push({
+								path: nodePath.concat(index),
+								fn: (node, updates, innerTemplate, getData) => {
+									let binding = childTemplate(innerTemplate);
+									node.replaceWith(binding.node);
+									updates.push(combineUpdates(binding.updates));
+								}
+							});
+						}
+					} else {
+						walk(child, nodePath.concat(index));
+					}
+				});
 			}
 			if (node.attributes) {
 				for (let attr of node.attributes) {
 					if (attr.name[0] === '$') {
 						// TODO: register special handlers
 						let name = attr.name.substr(1);
-						let contents = expandPlaceholders(attr.value);
-						if (!contents) continue;
+						let contents = expandPlaceholders(attr.value) || [attr.value];
 
 						let getValue = (data, ...args) => {
 							return contents.map(entry => {
@@ -387,10 +427,14 @@ let Matsui = (() => {
 	let templateCache = Symbol();
 	class TemplateSet {
 		attributes = {};
+		directives = {};
 	
 		constructor(parent) {
 			this.#parent = parent;
-			if (parent) this.attributes = Object.create(parent.attributes);
+			if (parent) {
+				this.attributes = Object.create(parent.attributes);
+				this.directives = Object.create(parent.directives);
+			}
 
 			/* Switches between templates, based on the filtered list */
 			this.dynamic = innerTemplate => {
@@ -511,8 +555,8 @@ let Matsui = (() => {
 					}
 				} else if (match == '=') {
 					value = (data => data);
-				} else {
-					if (/\s/.test(match)) console.error("Suspicious template key:", match);
+				} else if (!$ && /\s/.test(match)) {
+					return all;
 				}
 				placeholderMap[placeholder] = {
 					template: templateFromIds(templateSet, prefix.split('$').slice(1)),
@@ -528,15 +572,21 @@ let Matsui = (() => {
 					node.childNodes.forEach(child => {
 						if (child.nodeType !== 1) return;
 						let name = child.id || child.getAttribute('name');
-						if (child.tagName === 'TEMPLATE' && name) {
-							if (!childSet) childSet = templateSet.extend();
-							childSet.addElement(name, child);
+						if (child.tagName === 'TEMPLATE') {
+							for (let attr of child.attributes) {
+								if (attr.name[0] === '@') {
+									attr.value = replaceString(attr.value, templateSet);
+								}
+							}
+							if (name) {
+								if (!childSet) childSet = templateSet.extend();
+								childSet.addElement(name, child);
+							}
 						}
 					});
 					if (childSet) templateSet = childSet;
 				}
 				if (node.nodeType === 1) { // element
-					if (node.hasAttribute('@raw')) return;
 					for (let attr of node.attributes) {
 						if (attr.name[0] == '$') {
 							attr.value = replaceString(attr.value, templateSet);
@@ -563,7 +613,9 @@ let Matsui = (() => {
 				if (key === '=') {
 					value = (data => data);
 				}
-				if (/\s/.test(key)) console.error("Suspicious template key:", key);
+				if (/\s/.test(key)) {
+					return all;
+				}
 				placeholderMap[placeholder] = {
 					template: templateFromIds(this, prefixes.split('$').slice(1)),
 					value: value
@@ -619,7 +671,8 @@ let Matsui = (() => {
 			}]
 		};
 	}, data => !isObject(data));
-	globalSet.add("list", innerTemplate => {
+	globalSet.add("list", function listTemplate(innerTemplate) {
+		if (innerTemplate == listTemplate) throw Error("That's not right...");
 		let fragment = document.createDocumentFragment();
 		let separators = [document.createTextNode("")];
 		fragment.appendChild(separators[0]);
@@ -666,7 +719,7 @@ let Matsui = (() => {
 					// add new entries
 					while (updateList.length < data.length) {
 						let endSep = addSeparator();
-						let binding = innerTemplate(innerTemplate);
+						let binding = innerTemplate(globalSet.getNamed("json"));
 						endSep.before(binding.node);
 						updateList.push(combineUpdates(binding.updates));
 					}
@@ -675,13 +728,32 @@ let Matsui = (() => {
 						if (index in mergeValue) update(data[index]);
 					});
 				} else if (isObject(data)) {
-					throw Error("not implemented yet");
+//					throw Error("not implemented yet");
+					clear();
+					let text = document.createTextNode("Not a list:" + JSON.stringify(data));
+					let endSep = addSeparator();
+					endSep.before(text);
 				} else {
 					clear();
 				}
 			}]
 		};
 	});
+	globalSet.directives.foreach = (template, dataFn, templateSet) => {
+		let list = templateSet.getNamed('list');
+		if (typeof dataFn != 'function') throw Error("@foreach needs a data-function argument");
+		return innerTemplate => {
+			let binding = list(_ => template(innerTemplate));
+			return {
+				node: binding.node,
+				updates: [data => {
+					let subData = dataFn(data);
+					binding.updates.forEach(fn => fn(subData));
+				}]
+			};
+			return binding;
+		};
+	};
 	
 	function TrackedRender(data, synchronous) {
 		let mergeTracked;

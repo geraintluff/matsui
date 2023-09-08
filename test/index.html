@@ -208,30 +208,15 @@
 			}
 		</script>
 		
-		<template id="test-template">
+		<template id="tests-template">
 			<table class="tests">
-				<tr>
-					<td class="status">${data => mapStatus(data.status.iframe)}</td>
-					<td class="name">{name}</td>
-					<td>{message}</td>
-				</tr>
-				<!--<tfoot>
-					<tr><th>iframe</th><th>name</th><th></th>
-				</tfoot>-->
-			</table>
-		</template>
-		<template id="suite-template">
-			<table class="suites">
-				<tr class="header">
-					<th>{name}</th>
-					<td>${data => data.tests.length} tests</td>
-				</tr>
-				<tr class="test-list">
-					<td></td>
-					<td>
-						$list$test-template{tests}
-					</td>
-				</tr>
+				<template @forEach="{=}">
+					<tr>
+						<td class="status">${data => mapStatus(data.status.iframe)}</td>
+						<td class="name">{name}</td>
+						<td>{message}</td>
+					</tr>
+				</template>
 			</table>
 		</template>
 		<template id="test-runner-template">
@@ -239,9 +224,23 @@
 				<iframe id="iframe-runner"></iframe>
 				<div id="message">{message}</div>
 			</div>
-			$list$suite-template{suites}
+<!--			$list$suite-template{suites}-->
+			<table class="suites">
+				<template @forEach="{suites}">
+					<tr class="header">
+						<th>{name}</th>
+						<td>${data => data.tests.length} tests</td>
+					</tr>
+					<tr class="test-list">
+						<td></td>
+						<td>
+							$tests-template{tests}
+						</td>
+					</tr>
+				</template>
+			</table>
 			
-			<style @raw>
+			<style>
 				body {
 					font-family: sans-serif;
 					padding: 0;
