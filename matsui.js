@@ -1,6 +1,7 @@
 "use strict"
 let Matsui = (() => {
 	let isObject = data => (data && typeof data === 'object');
+	let makePlaceholderNode = () => document.createTextNode("");
 
 	/*--- JSON Patch Merge stuff ---*/
 
@@ -236,7 +237,6 @@ let Matsui = (() => {
 			let inner = result;
 			result = fallback => outerTemplate(_ => inner(fallback));
 		}
-		result.ids = ids;
 		return result;
 	}
 	
@@ -275,18 +275,17 @@ let Matsui = (() => {
 
 						for (let attr of child.attributes) {
 							if (attr.name[0] === '@') {
-								let name = attr.name.substr(1);
 								let contents = expandPlaceholders(attr.value) || [attr.value];
 							
 								let getValue = (data, ...args) => {
 									return contents.map(entry => {
 										if (typeof entry === 'string') return entry;
-										return entry.value(data, ...args);
+										return entry.m_value(data, ...args);
 									}).join("");
 								};
 								if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
 									getValue = (data, e) => {
-										return contents[1].value(data, e);
+										return contents[1].m_value(data, e);
 									};
 								}
 								
@@ -298,8 +297,8 @@ let Matsui = (() => {
 
 						if (childTemplate) {
 							setup.push({
-								path: nodePath.concat(index),
-								fn: (node, updates, innerTemplate, getData) => {
+								m_path: nodePath.concat(index),
+								m_fn: (node, updates, innerTemplate, getData) => {
 									let binding = childTemplate(innerTemplate);
 									node.replaceWith(binding.node);
 									updates.push(combineUpdates(binding.updates));
@@ -321,17 +320,17 @@ let Matsui = (() => {
 						let getValue = (data, ...args) => {
 							return contents.map(entry => {
 								if (typeof entry === 'string') return entry;
-								return entry.value(data, ...args);
+								return entry.m_value(data, ...args);
 							}).join("");
 						};
 						if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
 							getValue = (data, e) => {
-								return contents[1].value(data, e);
+								return contents[1].m_value(data, e);
 							};
 						}
 						setup.push({
-							path: nodePath,
-							fn: (node, updates, innerTemplate, getData) => {
+							m_path: nodePath,
+							m_fn: (node, updates, innerTemplate, getData) => {
 								if (name in templateSet.attributes) {
 									cacheLatestData = true; // can't be sure we don't need it
 									let valueFn = (...args) => {
@@ -370,18 +369,18 @@ let Matsui = (() => {
 				let contents = expandPlaceholders(node.nodeValue);
 				if (contents) {
 					setup.push({
-						path: nodePath,
-						fn: (node, updates, innerTemplate) => {
+						m_path: nodePath,
+						m_fn: (node, updates, innerTemplate) => {
 							contents.forEach(entry => {
 								if (typeof entry === 'string') {
 									if (entry) node.before(entry);
 								} else {
-									let binding = entry.template(innerTemplate);
+									let binding = entry.m_template(innerTemplate);
 									node.before(binding.node);
 									updates.push(data => {
 										let itemData;
 										try {
-											itemData = entry.value(data); // item is the mapping function
+											itemData = entry.m_value(data); // item is the mapping function
 										} catch (e) {
 											itemData = e.message;
 										}
@@ -404,14 +403,14 @@ let Matsui = (() => {
 			// find all the nodes first, before we mess with anything
 			let subNodes = setup.map(setup => {
 				let subNode = node;
-				setup.path.forEach(i => subNode = subNode.childNodes[i]);
+				setup.m_path.forEach(i => subNode = subNode.childNodes[i]);
 				return subNode;
 			});
 			let latestData = null;
 			let getData = () => latestData;
 			let updates = [];
 			setup.forEach((obj, index) => {
-				obj.fn(subNodes[index], updates, innerTemplate, getData);
+				obj.m_fn(subNodes[index], updates, innerTemplate, getData);
 			});
 			if (cacheLatestData) {
 				updates.unshift(data => {
@@ -441,8 +440,8 @@ let Matsui = (() => {
 			/* Switches between templates, based on the filtered list */
 			this.dynamic = innerTemplate => {
 				let node = document.createDocumentFragment();
-				let startNode = document.createTextNode("");
-				let endNode = document.createTextNode("");
+				let startNode = makePlaceholderNode();
+				let endNode = makePlaceholderNode();
 				node.append(startNode, endNode);
 				
 				let currentTemplate, currentUpdates;
@@ -484,8 +483,8 @@ let Matsui = (() => {
 			if (name) this.#map[name] = template;
 			if (filter) {
 				this.#filtered.unshift({
-					filter: filter,
-					fn: template
+					m_filter: filter,
+					m_fn: template
 				})
 			}
 			return this;
@@ -520,9 +519,9 @@ let Matsui = (() => {
 		getForData(data, extraResults) {
 			for (let i = 0; i < this.#filtered.length; ++i) {
 				let entry = this.#filtered[i];
-				if (entry.filter(data)) {
-					if (extraResults) extraResults.filter = entry.filter;
-					return entry.fn;
+				if (entry.m_filter(data)) {
+					if (extraResults) extraResults.filter = entry.m_filter;
+					return entry.m_fn;
 				}
 			}
 			if (this.#parent) return this.#parent.getForData(data);
@@ -561,8 +560,8 @@ let Matsui = (() => {
 					return all;
 				}
 				placeholderMap[placeholder] = {
-					template: templateFromIds(templateSet, prefix.split('$').slice(1)),
-					value: value
+					m_template: templateFromIds(templateSet, prefix.split('$').slice(1)),
+					m_value: value
 				};
 				return placeholder;
 			});
@@ -623,8 +622,8 @@ let Matsui = (() => {
 					return all;
 				}
 				placeholderMap[placeholder] = {
-					template: templateFromIds(this, prefixes.split('$').slice(1)),
-					value: value
+					m_template: templateFromIds(this, prefixes.split('$').slice(1)),
+					m_value: value
 				}
 				return placeholder;
 			});
@@ -633,12 +632,12 @@ let Matsui = (() => {
 			for (let i = 0; i < values.length; ++i) {
 				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
 				let entry = {
-					template: t => t(t),
-					value: values[i]
+					m_template: t => t(t),
+					m_value: values[i]
 				};
 				// Steal prefixes from the previous string
 				parts[parts.length - 1] = parts[parts.length - 1].replace(/(\$[a-z_-]+)*$/, prefixes => {
-					entry.template = templateFromIds(this, prefixes.split('$').slice(1));
+					entry.m_template = templateFromIds(this, prefixes.split('$').slice(1));
 					return "";
 				});
 				placeholderMap[placeholder] = entry;
@@ -659,7 +658,7 @@ let Matsui = (() => {
 
 	let globalSet = new TemplateSet();
 	globalSet.add("json", innerTemplate => {
-		let textNode = document.createTextNode("");
+		let textNode = makePlaceholderNode();
 		return {
 			node: textNode,
 			updates: [data => {
@@ -668,7 +667,7 @@ let Matsui = (() => {
 		};
 	}, data => true);
 	globalSet.add("text", innerTemplate => {
-		let textNode = document.createTextNode("");
+		let textNode = makePlaceholderNode();
 		return {
 			node: textNode,
 			updates: [data => {
@@ -677,10 +676,9 @@ let Matsui = (() => {
 			}]
 		};
 	}, data => !isObject(data));
-	globalSet.add("list", function listTemplate(innerTemplate) {
-		if (innerTemplate == listTemplate) throw Error("That's not right...");
+	globalSet.add("list", innerTemplate => {
 		let fragment = document.createDocumentFragment();
-		let separators = [document.createTextNode("")];
+		let separators = [makePlaceholderNode()];
 		fragment.appendChild(separators[0]);
 		let updateList, updateObj;
 
@@ -698,7 +696,7 @@ let Matsui = (() => {
 			updateObj = null;
 		};
 		let addSeparator = () => {
-			let sep = document.createTextNode("");
+			let sep = makePlaceholderNode();
 			separators[separators.length - 1].after(sep);
 			separators.push(sep);
 			return sep;
@@ -754,7 +752,6 @@ let Matsui = (() => {
 					binding.updates.forEach(fn => fn(subData));
 				}]
 			};
-			return binding;
 		};
 	};
 	
