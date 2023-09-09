@@ -182,7 +182,9 @@ let Matsui = (() => {
 			return trackerObj[trackerSetKey];
 		}
 	};
-	
+
+	/*--- Rendering stuff ---*/
+
 	let combineUpdates = updateFunctions => {
 		let updateTriggers = {};
 		let firstRun = true;
@@ -728,11 +730,7 @@ let Matsui = (() => {
 						if (index in mergeValue) update(data[index]);
 					});
 				} else if (isObject(data)) {
-//					throw Error("not implemented yet");
-					clear();
-					let text = document.createTextNode("Not a list:" + JSON.stringify(data));
-					let endSep = addSeparator();
-					endSep.before(text);
+					throw Error("not implemented yet");
 				} else {
 					clear();
 				}
@@ -741,6 +739,7 @@ let Matsui = (() => {
 	});
 	globalSet.directives.foreach = (template, dataFn, templateSet) => {
 		let list = templateSet.getNamed('list');
+		if (dataFn == '') dataFn = (x => x);
 		if (typeof dataFn != 'function') throw Error("@foreach needs a data-function argument");
 		return innerTemplate => {
 			let binding = list(_ => template(innerTemplate));
@@ -783,25 +782,24 @@ let Matsui = (() => {
 			sendUpdate(mergeObj);
 		};
 		this.replace = newData => {
-			let mergeObj = newData;
-			if (replaceHost) {
-				mergeObj = merge.make(data, newData);
-			} else {
-				updateDisplayWithMerge(null, null); // clears the render down to just a text node
-			}
+			let mergeObj = merge.make(data, newData);
 			setData(newData);
 			sendUpdate(mergeObj);
 		};
 		
-		function addBinding(host, templateSet, template) {
+		function addBinding(host, templateOrSet, template, replace) {
 			if (typeof host === 'string') host = document.querySelector(host);
 			if (!host) throw Error("invalid host");
 			
-			if (typeof templateSet === 'function') {
+			if (typeof templateOrSet === 'string') {
+				templateOrSet = document.querySelector(templateOrSet);
+				if (templateOrSet) templateOrSet = globalSet.fromElement(templateOrSet);
+			}
+			let templateSet = templateOrSet || globalSet;
+			if (typeof templateOrSet === 'function') {
 				template = templateSet;
 				templateSet = globalSet;
 			}
-			if (!templateSet) templateSet = globalSet;
 			if (!template) template = templateSet.fromElement(host);
 
 			let bindingInfo = template(templateSet.dynamic);
@@ -812,18 +810,21 @@ let Matsui = (() => {
 			// and update on future data as well
 			updateFunctions.push(updateDisplay);
 			
-			return bindingInfo.node;
+			let node = bindingInfo.node;
+			if (replace) {
+				if (host !== node) { // it might be filling out existing nodes in-place
+					host.replaceWith(node);
+				}
+			} else {
+				host.append(node);
+			}
 		}
 		this.addTo = (element, templateOrSet, template) => {
-			let node = addBinding(element, templateOrSet, template);
-			element.append(node);
+			addBinding(element, templateOrSet, template, false);
 			return this;
 		}
 		this.replace = (element, templateOrSet, template) => {
-			let node = addBinding(element, templateOrSet, template);
-			if (element !== node) { // it might be filling out existing nodes in-place
-				host.replaceWith(node);
-			}
+			addBinding(element, templateOrSet, template, true);
 			return this;
 		}
 	}

@@ -157,6 +157,8 @@
 					}
 				});
 			</script>
+			
+			<nav class="auto"></nav>
 
 			<h2>Overview</h2>
 
@@ -222,6 +224,74 @@ let render = Matsui.replace(div, {name: "you"});
 					}
 				});
 			</script>
+
+			<h3>Named templates</h3>
+			<p>These values can be prefixed with a template identifier (e.g. <code>$list</code>) which specifies which template should be used to render that value:</p>
+			<script>
+				matsuiExample({
+					html: `
+<template name="named-item">
+	<li>{=}</li>
+</template>
+
+<template id="named-list">
+	<ol>
+		$list$named-item{list}
+	</ol>
+</template>
+
+<div>$named-list{=}</div>`,
+					js: `
+Matsui.global.addAll(); // scans the whole page
+let data = {
+	list: ["one", "two", "three"]
+};
+let render = Matsui.replace(div, data);
+`,
+					vars: {
+						div: 'div'
+					}
+				});
+			</script>
+			<p>You can add named elements from <code>&lt;template></code>s with a <code>name</code> or <code>id</code> attribute, by using <code>.addAll(queryOrList)</code>.</p>
+			<p>You can add a named template from <em>any</em> element using <code>.addElement(name, ...)</code>.</p>
+
+			<h3>CSP support &amp; tagged templates</h3>
+			<p><a href="https://content-security-policy.com/">Content Security Policies</a> place extra restrictions on what gets run/displayed in a web-page.  This includes banning <code>eval</code>/<code>Function()</code>, inline event handlers (<code>onclick="myFunc()"</code>) and inline <code>&lt;script></code> elements.</p>
+			<p>When this is active, we can't define templates using DOM nodes, but we can use the same syntax as a tagged template:</p>
+			<script>
+				matsuiExample({
+					html: `
+<div></div>`,
+					js: `
+let template = Matsui.global.fromTag\`
+	<p>Hello {name}! 1+1=\${data => 1 + 1}</p>
+\`;
+let data = {name: "you"};
+let render = Matsui.addTo(div, data, template);
+`,
+					vars: {
+						div: 'div'
+					}
+				});
+			</script>
+			<p>To add these as named templates, you can use <code>.addTag(name)</code>:</p>
+			<script>
+				matsuiExample({
+					html: `
+<div>$named-tag{=}</div>`,
+					js: `
+Matsui.global.addTag('named-tag')\`
+	<p>Hello {name}! 1+1=\${data => 1 + 1}</p>
+\`;
+let data = {name: "you"};
+let render = Matsui.replace(div, data);
+`,
+					vars: {
+						div: 'div'
+					}
+				});
+			</script>
 			
 			<h3>Attributes</h3>
 			<p>Attributes which start with <code>$</code> are treated as templated attributes.  The default implementation does one of the following:</p>
@@ -250,43 +320,7 @@ let render = Matsui.replace(div, {counter: 0});
 					}
 				});
 			</script>
-			<!--
-			<script>
-				matsuiExample({
-					html: `
-<div>
-	<input type="text"
-		$value="{text}"
-		$keyup="\${
-			(data, evt) => data.sync
-				&& (data.text = evt.target.value)
-		}">
-
-	<button $click="\${
-			data => data.sync = !data.sync
-		}">
-		\${data => data.sync ? "stop" : "sync"}
-	</button>
-	<button $click="\${data => data.text = 'X'}">
-		reset
-	</button>
-	<br>
-
-	<p>Text: <strong>{text}</strong></p>
-</div>`,
-					js: `
-let render = Matsui.replace(div, {
-	text: "hello",
-	sync: true
-});
-`,
-					vars: {
-						div: 'div',
-					}
-				});
-			</script>
-			-->
-			<p>However, you can also provide a handler for a particular <code>$...</code> attribute name, which might have more complex behaviour.  Here, a single attribute:</p>
+			<p>However, you can also provide a handler for a particular <code>$...</code> attribute name, for more complex behaviour.  Here, a single attribute:</p>
 			<ul>
 				<li>listens for mouse-clicks</li>
 				<li>listens for the <kbd>Enter</kbd> key</li>
@@ -348,81 +382,50 @@ function addEventHandlers(node, getValue) {
 				});
 			</script>
 			<p>The second <code>attrFn</code> argument to our attribute handler evaluates the attribute expression.  Any extra arguments you pass in are included as extra arguments to the <code>${data => ...}</code> functions in the attribute's value.</p>
+
+			<h3>Directives</h3>
+			<p>When a template contains another <code>&lt;template</code>, that inner template can be modified by "directives", which are functions which map one template to another.  They are specified on <code>templateSet.directives[...]</code>, and referenced with <code>@...</code> attributes on <code>&lt;template></code>.</p>
+			<p>A built-in example is <code>@foreach</code>, which wraps a template inside a list.  This is particularly useful in places where text nodes aren't allowed (such as inside <code>&lt;table></code>), but you can define whatever directives you like:</p>
 			
-			<h3>Named templates</h3>
-			<p>These values can be prefixed with a template identifier (e.g. <code>$list</code>) which specifies which template should be used to render that value:</p>
 			<script>
 				matsuiExample({
 					html: `
-<template name="named-item">
-	<li>{=}</li>
-</template>
-
-<template id="named-list">
+<div>
 	<ol>
-		$list$named-item{list}
+		<template @foreach="{items}">
+			<li>{=}</li>
+		</template>
 	</ol>
-</template>
-
-<div>$named-list{=}</div>`,
-					js: `
-Matsui.global.addAll(); // scans the whole page
-let data = {
-	list: ["one", "two", "three"]
-};
-let render = Matsui.replace(div, data);
+	<template @repeat="3">
+		{greeting}<br>
+	</template>
+</div>
 `,
-/*					extraJs: `
-data = render.data();
-setInterval(() => {
-	let index = Math.floor(Math.random()*data.list.length);
-	data.list[index] = data.list[index].replace(/[a-z]/ig, letter => {
-		if (Math.random() < 0.5) return letter.toUpperCase();
-		return letter.toLowerCase();
-	});
-}, 500);
-`,*/
-					vars: {
-						div: 'div'
-					}
-				});
-			</script>
-			<p>You can add named elements from <code>&lt;template></code>s with a <code>name</code> or <code>id</code> attribute, by using <code>.addAll(queryOrList)</code>.</p>
-			<p>You can add a named template from <em>any</em> element using <code>.addElement(name, ...)</code>.</p>
-			
-			<h3>CSP support &amp; tagged templates</h3>
-			<p><a href="https://content-security-policy.com/">Content Security Policies</a> place extra restrictions on what gets run/displayed in a web-page.  This includes banning <code>eval</code>/<code>Function()</code>, inline event handlers (<code>onclick="myFunc()"</code>) and inline <code>&lt;script></code> elements.</p>
-			<p>When this is active, we can't define templates using DOM nodes, but we can use the same syntax as a tagged template:</p>
-			<script>
-				matsuiExample({
-					html: `
-<div></div>`,
 					js: `
-let template = Matsui.global.fromTag\`
-	<p>Hello {name}! 1+1=\${data => 1 + 1}</p>
-\`;
-let data = {name: "you"};
-let render = Matsui.addTo(div, data, template);
+function repeat(tmpl, attrVal, templateSet) {
+	return innerTmpl => {
+		let n = document.createDocumentFragment();
+		let fns = [];
+		// doesn't need data
+		let repeats = parseInt(attrVal()) || 0;
+		
+		for (let r = 0; r < repeats; ++r) {
+			let binding = tmpl(innerTmpl);
+			n.append(binding.node);
+			fns = fns.concat(binding.updates);
+		}
+		return {node: n, updates: fns};
+	};
+}
+Matsui.global.directives.repeat = repeat;
+					
+let render = Matsui.replace(div, {
+	greeting: "Hello!",
+	items: ["one", "two", "three"]
+});
 `,
 					vars: {
-						div: 'div'
-					}
-				});
-			</script>
-			<p>To add these as named templates, you can use <code>.addTag(name)</code>:</p>
-			<script>
-				matsuiExample({
-					html: `
-<div>$named-tag{=}</div>`,
-					js: `
-Matsui.global.addTag('named-tag')\`
-	<p>Hello {name}! 1+1=\${data => 1 + 1}</p>
-\`;
-let data = {name: "you"};
-let render = Matsui.replace(div, data);
-`,
-					vars: {
-						div: 'div'
+						div: 'div',
 					}
 				});
 			</script>

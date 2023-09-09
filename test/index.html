@@ -2,6 +2,7 @@
 <html>
 	<head>
 		<title>Matsui tests</title>
+		<template id="title-suffix">: {message}</template>
 		<!--<meta http-equiv="Content-Security-Policy" content="default-src 'self'">-->
 		<meta charset="utf8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
@@ -136,7 +137,7 @@
 					let template = Matsui.global.fromElement('#test-runner-template');
 
 					document.body.innerHTML = '';
-					let render = Matsui.addTo(document.body, renderData, template);
+					let render = Matsui.addTo(document.body, renderData, template).addTo('head title', '#title-suffix');
 					renderData = render.data();
 					
 					let iframeRunner = document.getElementById('iframe-runner');
