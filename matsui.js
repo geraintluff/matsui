@@ -219,6 +219,7 @@ let Matsui = (() => {
 			});
 		};
 	}
+
 	/*--- Pre-supplied templates and template-construction methods ---*/
 	
 	function templateFromIds(templateSet, ids) {
@@ -622,18 +623,22 @@ let Matsui = (() => {
 
 			let parts = [replaceString(strings[0])];
 			for (let i = 0; i < values.length; ++i) {
-				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
-				let entry = {
-					m_template: t => t(t),
-					m_value: values[i]
-				};
-				// Steal prefixes from the previous string
-				parts[parts.length - 1] = parts[parts.length - 1].replace(/(\$[a-z_-]+)*$/, prefixes => {
-					entry.m_template = templateFromIds(this, prefixes.split('$').slice(1));
-					return "";
-				});
-				placeholderMap[placeholder] = entry;
-				parts.push(placeholder);
+				if (typeof values[i] === 'function') {
+					let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
+					let entry = {
+						m_template: t => t(t),
+						m_value: values[i]
+					};
+					// Steal prefixes from the previous string
+					parts[parts.length - 1] = parts[parts.length - 1].replace(/(\$[a-z_-]+)*$/, prefixes => {
+						entry.m_template = templateFromIds(this, prefixes.split('$').slice(1));
+						return "";
+					});
+					placeholderMap[placeholder] = entry;
+					parts.push(placeholder);
+				} else {
+					parts.push(values[i] + "");
+				}
 				
 				parts.push(replaceString(strings[i + 1]));
 			}

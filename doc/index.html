@@ -18,23 +18,13 @@
 				background: #FFF;
 				padding: 0;
 				box-shadow: none;
-				width: calc(max(300pt, 50%));
+				width: calc(max(25em, 50%));
 				max-width: 100%;
 				margin: 0 auto 1.5rem auto;
 				position: relative;
 				z-index: 1;
 				box-sizing: border-box;
 			}
-			/*
-			@media (min-width: 600pt) {
-				.example {
-					float: right;
-					clear: right;
-					margin-left: 0.8em;
-					margin-bottom: 1em;
-				}
-			}
-			*/
 			.example figure {
 				text-align: start;
 				padding: 0.5em 0.5em;
@@ -478,6 +468,84 @@ Matsui.replace(div, {sequence: []}, templates);
 				});
 			</script>
 			<p>However, it's worth noting that this <strong>template selection is sticky</strong>.  This means that if the previously-used template's filter still returns <code>true</code>, it will continue to be used - even if there are higher-priority templates which would also accept the data.</p>
+			
+			<h3>SVG</h3>
+
+			<script>
+				matsuiExample({
+					html: `
+<div></div>
+<style>
+	.defs {
+		position: fixed;
+		z-index: -1;
+		visibility: hidden;
+	}
+
+	.control-body {
+		fill: var(--control-body, #767676);
+	}
+	.control-track {
+		fill: none;
+		stroke: var(--control-track, #6666);
+	}
+	.control-value {
+		fill: none;
+		stroke: var(--control-value, currentcolor);
+	}
+
+	.control-display, .control-units {
+		font: var(--display-font);
+		font-size: 1px;
+		fill: var(--control-body-text, #FFF);
+		text-anchor: middle;
+		dominant-baseline: middle;
+	}
+
+	.control-units {
+		font-size: 0.8px;
+		opacity: 0.65;
+	}
+
+	.interaction-press {
+		filter: brightness(1.2);
+	}
+</style>`,
+					js: `
+let radius = 1.8;
+let arcThickness = 0.35;
+
+function arcPath(startAngle, endAngle, radius) {
+	endAngle = Math.min(endAngle, startAngle + Math.PI*1.999999);
+	endAngle = Math.max(endAngle, startAngle - Math.PI*1.999999);
+	return \`\${radius*Math.cos(startAngle)} \${radius*Math.sin(startAngle)}
+A \${radius} \${radius} 0 \${endAngle >= startAngle + Math.PI ? 1 : 0} 1 \${radius*Math.cos(endAngle)} \${radius*Math.sin(endAngle)}\`;
+}
+
+let dialTemplate = Matsui.global.fromTag\`
+	<svg width="\${radius*2}em" height="\${radius*2}em" viewBox="\${-radius} \${-radius} \${radius*2} \${radius*2}">
+		<circle class="control-body" cx="0" cy="0" r="\${radius - arcThickness}"/>
+		<path class="control-track" stroke-width="\${arcThickness}" fill="none"
+			d="M\${arcPath(0, 2*Math.PI, radius - arcThickness*0.5)}"/>
+		<path class="control-value" stroke-width="\${arcThickness}" fill="none"
+			$d="M\${data => arcPath(-0.5*Math.PI, (data.unitValue - 0.25)*2*Math.PI, radius - arcThickness*0.5)}"/>
+		<text class="control-display" x="0" y="\${(radius - arcThickness)*-0.05}">{display}</text>
+		<text class="control-units" x="0" y="\${(radius - arcThickness)*0.6}">{unit}</text>
+	</svg>
+\`;
+
+let render = Matsui.addTo(div, {unitValue: 0.3, unit: '%'}, dialTemplate);
+setInterval(() => {
+	let v = Math.random();
+	render.data().unitValue = v;
+	render.data().display = Math.round(v*100);
+}, 1);
+`,
+					vars: {
+						div: 'div',
+					}
+				});
+			</script>
 		</article>
 	</body>
 </html>
