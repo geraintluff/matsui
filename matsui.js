@@ -22,9 +22,9 @@ let Matsui = (() => {
 				if (Object.hasOwn(value, key)) {
 					if (childMerge == null && !keepNulls) {
 						delete value[key];
-						return;
+					} else {
+						value[key] = merge.apply(value[key], childMerge, keepNulls);
 					}
-					value[key] = merge.apply(value[key], childMerge, keepNulls);
 				} else if (childMerge != null) { // deliberately matching both null/undefined
 					value[key] = childMerge;
 				}
@@ -82,7 +82,7 @@ let Matsui = (() => {
 			
 			return new Proxy(data, {
 				get(obj, prop) {
-					let value = Reflect.get(...arguments);
+					let value = obj[prop];
 					if (!isObject(value)) return value;
 					return merge.tracked(
 						value,
@@ -92,8 +92,8 @@ let Matsui = (() => {
 					);
 				},
 				set(obj, prop, value, proxy) {
-					if (value == null) return Reflect.deleteProperty(proxy, prop);
-					let oldValue = Reflect.get(obj, prop);
+					if (value == null) return (delete proxy[prop]);
+					let oldValue = obj[prop];
 					if (Reflect.set(obj, prop, value)) {
 						updateFn({
 							[prop]: merge.make(oldValue, value)
@@ -103,7 +103,7 @@ let Matsui = (() => {
 					return false;
 				},
 				deleteProperty(obj, prop) {
-					if (Reflect.deleteProperty(obj, prop)) {
+					if (delete obj[prop]) {
 						updateFn({
 							[prop]: null
 						});
@@ -119,12 +119,12 @@ let Matsui = (() => {
 				get(obj, prop) {
 					if (prop == hiddenMergeKey) return mergeObj;
 					if (prop == hiddenMergePierceKey) return obj;
-					let value = Reflect.get(...arguments);
+					let value = obj[prop];
 					let hasChange = isObject(mergeObj) && (prop in mergeObj);
 					return merge.addHidden(value, hasChange ? mergeObj[prop] : noChangeSymbol);
 				},
 				has(obj, prop) {
-					return (prop == hiddenMergeKey) || Reflect.has(obj, prop);
+					return (prop == hiddenMergeKey) || (prop in obj);
 				}
 			});
 		},
@@ -143,7 +143,7 @@ let Matsui = (() => {
 
 	/*--- Access-tracking ---*/
 
-	let trackerSetKey = Symbol(), pierceKey = Symbol();
+	let pierceKey = Symbol();
 	let accessedKey = Symbol("accessed");
 	let access = {
 		tracked(data, trackerObj) {
@@ -154,7 +154,7 @@ let Matsui = (() => {
 			let isArray = Array.isArray(data);
 			let proxy = new Proxy(data, {
 				get(obj, prop) {
-					let value = Reflect.get(...arguments);
+					let value = obj[prop];
 					if (prop == pierceKey) {
 						trackerObj[accessedKey] = accessedKey;
 						return data;
@@ -203,12 +203,10 @@ let Matsui = (() => {
 				if (mergeValue == noChangeSymbol) return false;
 				if (trackerObj[accessedKey]) return true;
 				if (!isObject(mergeValue)) return false;
-				for (let key in mergeValue) {
-					if (trackerObj[key]) {
-						if (didAccess(trackerObj[key], mergeValue[key])) return true;
-					}
-				}
-				return false;
+				return Object.keys(mergeValue).some(key => {
+					return trackerObj[key]
+						&& didAccess(trackerObj[key], mergeValue[key]);
+				});
 			}
 			let mergeValue = merge.getHidden(data, noChangeSymbol /* re-use it because why not */);
 
