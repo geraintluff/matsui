@@ -144,14 +144,11 @@ let Matsui = (() => {
 	/*--- Access-tracking ---*/
 
 	let trackerSetKey = Symbol(), pierceKey = Symbol();
-	let addTrackerValue = (trackerObj, trackerValue) => {
-		if (!trackerObj[trackerSetKey]) trackerObj[trackerSetKey] = new Set();
-		trackerObj[trackerSetKey].add(trackerValue);
-	}
+	let accessedKey = Symbol("accessed");
 	let access = {
-		tracked(data, trackerObj, trackerValue) {
+		tracked(data, trackerObj) {
 			if (!isObject(data)) {
-				addTrackerValue(trackerObj, trackerValue);
+				trackerObj[accessedKey] = accessedKey;
 				return data;
 			}
 			let isArray = Array.isArray(data);
@@ -159,18 +156,18 @@ let Matsui = (() => {
 				get(obj, prop) {
 					let value = Reflect.get(...arguments);
 					if (prop == pierceKey) {
-						addTrackerValue(trackerObj, trackerValue);
+						trackerObj[accessedKey] = accessedKey;
 						return data;
 					} else if (isArray && prop === 'length') {
-						addTrackerValue(trackerObj, trackerValue);
+						trackerObj[accessedKey] = accessedKey;
 						return value;
 					}
 					
 					if (!(prop in trackerObj)) trackerObj[prop] = {};
-					return access.tracked(value, trackerObj[prop], trackerValue);
+					return access.tracked(value, trackerObj[prop]);
 				},
 				ownKeys(obj) { // We're being asked to list our keys - assume this means they're interested in the whole object (including key addition and deletion)
-					addTrackerValue(trackerObj, trackerValue);
+					trackerObj[accessedKey] = accessedKey;
 					return Reflect.ownKeys(obj);
 				}
 			});
@@ -179,16 +176,15 @@ let Matsui = (() => {
 		pierce(tracked) {
 			return (tracked && tracked[pierceKey]) || tracked;
 		},
-		trackedValues(trackerObj) {
-			return trackerObj[trackerSetKey];
-		}
+		accessed: accessedKey
 	};
 
 	/*--- Rendering stuff ---*/
 
 	let combineUpdates = updateFunctions => {
-		let updateTriggers = {};
 		let firstRun = true;
+		
+		let updateAccess = [];
 
 		return data => {
 			data = access.pierce(data);
@@ -196,32 +192,30 @@ let Matsui = (() => {
 			if (firstRun) { // run everything the first time
 				firstRun = false;
 				updateFunctions.forEach((fn, index) => {
-					let tracked = access.tracked(data, updateTriggers, index);
+					let trackerObj = updateAccess[index] = {};
+					let tracked = access.tracked(data, trackerObj);
 					fn(tracked);
 				});
 				return;
 			}
-
-			// Collect all the updates (by index) referenced by the merge, removing them as we go
-			let updateSet = new Set();
-			function addUpdates(merge, triggers) {
-				if (merge == noChangeSymbol) return;
-				let updates = access.trackedValues(triggers);
-				if (updates) {
-					updates.forEach(index => updateSet.add(index));
-					updates.clear();
+			
+			function didAccess(trackerObj, mergeValue) {
+				if (mergeValue == noChangeSymbol) return false;
+				if (trackerObj[accessedKey]) return true;
+				if (!isObject(mergeValue)) return false;
+				for (let key in mergeValue) {
+					if (trackerObj[key]) {
+						if (didAccess(trackerObj[key], mergeValue[key])) return true;
+					}
 				}
-				if (!isObject(merge)) return;
-				Object.keys(merge).forEach(key => {
-					if (Object.hasOwn(triggers, key)) addUpdates(merge[key], triggers[key]);
-				});
+				return false;
 			}
 			let mergeValue = merge.getHidden(data, noChangeSymbol /* re-use it because why not */);
-			addUpdates(mergeValue, updateTriggers);
 
 			updateFunctions.forEach((fn, index) => {
-				if (updateSet.has(index)) {
-					let tracked = access.tracked(data, updateTriggers, index);
+				if (didAccess(updateAccess[index], mergeValue)) {
+					let trackerObj = updateAccess[index] = {};
+					let tracked = access.tracked(data, trackerObj, index);
 					fn(tracked);
 				}
 			});
