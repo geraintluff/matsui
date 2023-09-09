@@ -384,7 +384,7 @@ function addEventHandlers(node, getValue) {
 			<p>The second <code>attrFn</code> argument to our attribute handler evaluates the attribute expression.  Any extra arguments you pass in are included as extra arguments to the <code>${data => ...}</code> functions in the attribute's value.</p>
 
 			<h3>Directives</h3>
-			<p>When a template contains another <code>&lt;template</code>, that inner template can be modified by "directives", which are functions which map one template to another.  They are specified on <code>templateSet.directives[...]</code>, and referenced with <code>@...</code> attributes on <code>&lt;template></code>.</p>
+			<p>When a template contains another <code>&lt;template></code>, that inner template can be modified by "directives", which are functions which map one template to another.  They are specified on <code>templateSet.directives[...]</code>, and referenced with <code>@...</code> attributes on <code>&lt;template></code>.</p>
 			<p>A built-in example is <code>@foreach</code>, which wraps a template inside a list.  This is particularly useful in places where text nodes aren't allowed (such as inside <code>&lt;table></code>), but you can define whatever directives you like:</p>
 			
 			<script>

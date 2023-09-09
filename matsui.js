@@ -271,7 +271,7 @@ let Matsui = (() => {
 			if (node.childNodes) {
 				node.childNodes.forEach((child, index) => {
 					if (child.tagName === 'TEMPLATE') {
-						let childTemplate = templateSet.fromElement(child);
+						let childTemplate = templateFromElementPlaceholders(child.content, placeholderMap, templateSet);
 
 						for (let attr of child.attributes) {
 							if (attr.name[0] === '@') {
@@ -582,8 +582,12 @@ let Matsui = (() => {
 							}
 							if (name) {
 								if (!childSet) childSet = templateSet.extend();
-								childSet.addElement(name, child);
+								childSet.add(name, innerTmpl => {
+									// it will be cached on the child element
+									return templateSet.fromElement(child)(innerTmpl);
+								});
 							}
+							walk(child.content, templateSet);
 						}
 					});
 					if (childSet) templateSet = childSet;
