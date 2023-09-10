@@ -473,73 +473,53 @@ Matsui.replace(div, {sequence: []}, templates);
 
 			<script>
 				matsuiExample({
-					html: `
-<div></div>
-<style>
-	.defs {
-		position: fixed;
-		z-index: -1;
-		visibility: hidden;
-	}
-
-	.control-body {
-		fill: var(--control-body, #767676);
-	}
-	.control-track {
-		fill: none;
-		stroke: var(--control-track, #6666);
-	}
-	.control-value {
-		fill: none;
-		stroke: var(--control-value, currentcolor);
-	}
-
-	.control-display, .control-units {
-		font: var(--display-font);
-		font-size: 1px;
-		fill: var(--control-body-text, #FFF);
-		text-anchor: middle;
-		dominant-baseline: middle;
-	}
-
-	.control-units {
-		font-size: 0.8px;
-		opacity: 0.65;
-	}
-
-	.interaction-press {
-		filter: brightness(1.2);
-	}
-</style>`,
+					html: `<div></div>`,
 					js: `
-let radius = 1.8;
-let arcThickness = 0.35;
+let dialTemplate = (radius, arcThickness, lowAngle, highAngle) => {
+	let totalRadius = radius + arcThickness;
+	let arcRadius = radius + arcThickness*0.5;
+	if (lowAngle == highAngle) {
+		lowAngle = lowAngle || 0;
+		highAngle = lowAngle + 1;
+	}
 
-function arcPath(startAngle, endAngle, radius) {
-	endAngle = Math.min(endAngle, startAngle + Math.PI*1.999999);
-	endAngle = Math.max(endAngle, startAngle - Math.PI*1.999999);
-	return \`\${radius*Math.cos(startAngle)} \${radius*Math.sin(startAngle)}
-A \${radius} \${radius} 0 \${endAngle >= startAngle + Math.PI ? 1 : 0} 1 \${radius*Math.cos(endAngle)} \${radius*Math.sin(endAngle)}\`;
-}
+	let rangeAngle = (highAngle - lowAngle)*2*Math.PI;
+	lowAngle = (lowAngle - 0.25)*2*Math.PI;
+	console.log(lowAngle, rangeAngle);
+	function arcPath(startValue, endValue) {
+		endValue = Math.min(Math.max(endValue, startValue - 0.999999), startValue + 0.999999);
+		let startAngle = lowAngle + startValue*rangeAngle;
+		let endAngle = lowAngle + endValue*rangeAngle;
+		let largeArc = (Math.abs(endAngle - startAngle) >= Math.PI) ? 1 : 0;
+		let direction = (endAngle > startAngle) ? 1 : 0;
+		return \`\${arcRadius*Math.cos(startAngle)} \${arcRadius*Math.sin(startAngle)}
+	A \${arcRadius} \${arcRadius} 0 \${largeArc} \${direction} \${arcRadius*Math.cos(endAngle)} \${arcRadius*Math.sin(endAngle)}\`;
+	}
 
-let dialTemplate = Matsui.global.fromTag\`
-	<svg width="\${radius*2}em" height="\${radius*2}em" viewBox="\${-radius} \${-radius} \${radius*2} \${radius*2}">
-		<circle class="control-body" cx="0" cy="0" r="\${radius - arcThickness}"/>
-		<path class="control-track" stroke-width="\${arcThickness}" fill="none"
-			d="M\${arcPath(0, 2*Math.PI, radius - arcThickness*0.5)}"/>
-		<path class="control-value" stroke-width="\${arcThickness}" fill="none"
-			$d="M\${data => arcPath(-0.5*Math.PI, (data.unitValue - 0.25)*2*Math.PI, radius - arcThickness*0.5)}"/>
-		<text class="control-display" x="0" y="\${(radius - arcThickness)*-0.05}">{display}</text>
-		<text class="control-units" x="0" y="\${(radius - arcThickness)*0.6}">{unit}</text>
-	</svg>
-\`;
+	return Matsui.global.fromTag\`
+		<svg width="\${totalRadius*2}em" height="\${totalRadius*2}em" viewBox="\${-totalRadius} \${-totalRadius} \${totalRadius*2} \${totalRadius*2}">
+			<circle fill="#767676" cx="0" cy="0" r="\${radius}" />
+			<g fill="none" stroke-width="\${arcThickness}" stroke-linecap="butt">
+				<path stroke="#6666"
+					d="M\${arcPath(0, 1)}"/>
+				<path stroke="currentcolor"
+					$d="M\${data => arcPath(0, data.unitValue)}"/>
+			</g>
+			<g font-family="Trebuchet MS, sans-serif" font-size="1px" fill="#FFF" text-anchor="middle" dominant-baseline="middle">
+				<text class="control-display" x="0" y="\${radius*-0.05}">{display}</text>
+				<text opacity="0.65" font-size="0.8px" x="0" y="\${radius*0.6}">{unit}</text>
+			</g>
+		</svg>
+	\`;
+};
 
-let render = Matsui.addTo(div, {unitValue: 0.3, unit: '%'}, dialTemplate);
+let render = Matsui.addTo(div, {unitValue: 0.3, unit: '%'}, dialTemplate(1.4, 0.4, -0.35, 0.35));
 setInterval(() => {
-	let v = Math.random();
+	let v = (Date.now()*0.0005)%2;
+	v = Math.min(v, 2 - v);
 	render.data().unitValue = v;
 	render.data().display = Math.round(v*100);
-}, 1);
+}, 20);
 `,
 					vars: {
 						div: 'div',
