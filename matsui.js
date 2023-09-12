@@ -277,8 +277,8 @@ let Matsui = (() => {
 									}).join("");
 								};
 								if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
-									getValue = (data, e) => {
-										return contents[1].m_value(data, e);
+									getValue = (data, ...args) => {
+										return contents[1].m_value(data, ...args);
 									};
 								}
 								
@@ -302,61 +302,6 @@ let Matsui = (() => {
 						walk(child, nodePath.concat(index));
 					}
 				});
-			}
-			if (node.attributes) {
-				for (let attr of node.attributes) {
-					if (attr.name[0] === '$') {
-						// TODO: register special handlers
-						let name = attr.name.substr(1);
-						let contents = expandPlaceholders(attr.value) || [attr.value];
-
-						let getValue = (data, ...args) => {
-							return contents.map(entry => {
-								if (typeof entry === 'string') return entry;
-								return entry.m_value(data, ...args);
-							}).join("");
-						};
-						if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
-							getValue = (data, e) => {
-								return contents[1].m_value(data, e);
-							};
-						}
-						setup.push({
-							m_path: nodePath,
-							m_fn: (node, updates, innerTemplate, getData) => {
-								if (name in templateSet.attributes) {
-									cacheLatestData = true; // can't be sure we don't need it
-									let valueFn = (...args) => {
-										return getValue(getData(), ...args);
-									};
-									let update = templateSet.attributes[name].call(node, node, valueFn);
-									if (typeof update === 'function') {
-										updates.push(update);
-									}
-									return;
-								}
-							
-								if (('on' + name) in node) {
-									cacheLatestData = true;
-									node.addEventListener(name, e => {
-										getValue(getData(), e);
-									});
-								} else {
-									updates.push(data => {
-										let value = getValue(data);
-										if (name in node) {
-											if (node[name] !== value) {
-												node[name] = value;
-											}
-										} else {
-											node.setAttribute(name, value);
-										}
-									});
-								}
-							}
-						});
-					}
-				}
 			}
 			if (node.nodeType == 3) { // text
 				let contents = expandPlaceholders(node.nodeValue);
@@ -384,6 +329,67 @@ let Matsui = (() => {
 							node.remove();
 						}
 					});
+				}
+			}
+			// Attributes go after content updates
+			if (node.attributes) {
+				for (let attr of node.attributes) {
+					if (attr.name[0] === '$') {
+						// TODO: register special handlers
+						let name = attr.name.substr(1);
+						let contents = expandPlaceholders(attr.value) || [attr.value];
+
+						let getValue = (data, ...args) => {
+							return contents.map(entry => {
+								if (typeof entry === 'string') return entry;
+								return entry.m_value(data, ...args);
+							}).join("");
+						};
+						if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
+							getValue = (data, ...args) => {
+								return contents[1].m_value(data, ...args);
+							};
+						}
+						setup.push({
+							m_path: nodePath,
+							m_fn: (node, updates, innerTemplate, getData) => {
+								if (name in templateSet.attributes) {
+									cacheLatestData = true; // can't be sure we don't need it
+									let activeUpdateValue = null;
+									let valueFn = (...args) => {
+										return getValue(activeUpdateValue || getData(), ...args);
+									};
+									let update = templateSet.attributes[name].call(node, node, valueFn);
+									if (typeof update === 'function') {
+										updates.push(data => {
+											activeUpdateValue = data;
+											update(data);
+											activeUpdateValue = null;
+										});
+									}
+									return;
+								}
+							
+								if (('on' + name) in node) {
+									cacheLatestData = true;
+									node.addEventListener(name, e => {
+										getValue(getData(), e);
+									});
+								} else {
+									updates.push(data => {
+										let value = getValue(data);
+										if (name in node) {
+											if (node[name] !== value) {
+												node[name] = value;
+											}
+										} else {
+											node.setAttribute(name, value);
+										}
+									});
+								}
+							}
+						});
+					}
 				}
 			}
 		}
@@ -517,7 +523,7 @@ let Matsui = (() => {
 					return entry.m_fn;
 				}
 			}
-			if (this.#parent) return this.#parent.getForData(data);
+			if (this.#parent) return this.#parent.getForData(data, extraResults);
 			throw Error("No template for data");
 		}
 		
@@ -755,13 +761,17 @@ let Matsui = (() => {
 	function TrackedRender(data, synchronous) {
 		let mergeTracked;
 		let updateFunctions = [];
-		let sendUpdate = mergeObj => {
-			let withMerge = merge.addHidden(mergeTracked, mergeObj);
-			updateFunctions.forEach(fn => fn(withMerge));
+		let sendUpdate = (mergeObj, fromExternalMethod) => {
+			updateFunctions.forEach(obj => {
+				if (!fromExternalMethod || obj.m_notifyExternal) obj.m_fn(mergeObj)
+			});
 		};
 		// Register for merge updates
-		this.track = fn => {
-			updateFunctions.push(fn);
+		this.track = (fn, notifyExternal) => {
+			updateFunctions.push({
+				m_fn: fn,
+				m_notifyExternal: !!notifyExternal
+			});
 			return this;
 		};
 
@@ -777,15 +787,15 @@ let Matsui = (() => {
 		this.merge = mergeObj => {
 			let newData = merge.apply(data, mergeObj);
 			if (newData !== data) setData(newData);
-			sendUpdate(mergeObj);
+			sendUpdate(mergeObj, true);
 		};
 		this.replace = newData => {
 			let mergeObj = merge.make(data, newData);
 			setData(newData);
-			sendUpdate(mergeObj);
+			sendUpdate(mergeObj, true);
 		};
 		
-		function addBinding(host, templateOrSet, template, replace) {
+		let addBinding = (host, templateOrSet, template, replace) => {
 			if (typeof host === 'string') host = document.querySelector(host);
 			if (!host) throw Error("invalid host");
 			
@@ -806,7 +816,10 @@ let Matsui = (() => {
 			// Update the display straight away
 			updateDisplay(mergeTracked, data);
 			// and update on future data as well
-			updateFunctions.push(updateDisplay);
+			this.track(mergeObj => {
+				let withMerge = merge.addHidden(mergeTracked, mergeObj);
+				updateDisplay(withMerge);
+			}, true);
 			
 			let node = bindingInfo.node;
 			if (replace) {

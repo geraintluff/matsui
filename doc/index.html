@@ -513,7 +513,7 @@ let dialTemplate = (radius, arcThickness, lowAngle, highAngle) => {
 	\`;
 };
 
-let render = Matsui.addTo(div, {unitValue: 0.3, unit: '%'}, dialTemplate(1.4, 0.4, -0.35, 0.35));
+let render = Matsui.addTo(div, {unitValue: 0.3, unit: '%'}, dialTemplate(1.4/*1.8*/, 0.4, -0.35, 0.35));
 setInterval(() => {
 	let v = (Date.now()*0.0005)%2;
 	v = Math.min(v, 2 - v);
