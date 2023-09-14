@@ -758,6 +758,67 @@ let Matsui = (() => {
 		};
 	};
 	
+	let sync = {
+		hash: {
+			setup(handler) {
+				addEventListener("hashchange", handler);
+			},
+			read(hashKey, value) {
+				let path = location.href.replace(/^[^#]*#?/, '');
+				let query = {};
+				let queryPos = path.indexOf('?');
+				if (queryPos >= 0) {
+					let queryString = path.substr(queryPos + 1);
+					queryString.split('&').forEach(pair => {
+						if (!pair) return;
+						let parts = pair.split('=').map(x => {
+							try {
+								return decodeURIComponent(x);
+							} catch (e) {
+								return x;
+							}
+						});
+						query[parts.shift()] = parts.join('=');
+					});
+					path = path.substr(0, queryPos);
+				}
+
+				return Matsui.merge.make(value, {path: path, query: query}, true);
+			},
+			write(hashKey, value) {
+				let result = '';
+				if (value) {
+					let query = value.query || {};
+					let queryString = Object.keys(query).map(key => (
+						[key, query[key]].map(encodeURIComponent).join('=')
+					)).join('&');
+					result = (value.path || '') + (queryString && '?') + queryString;
+				}
+				location.href = ('#' + result);
+			}
+		},
+		localStorage: {
+			setup(handler) {
+				addEventListener("storage", handler);
+			},
+			read(storageKey, value) {
+				let newValue = null;
+				try {
+					let json = localStorage.getItem(storageKey);
+					if (!json) return;
+					newValue = JSON.parse(json);
+				} catch (e) {
+					console.error("JSON from localStorage:", e);
+				}
+				return Matsui.merge.make(value, newValue);
+			},
+			write(storageKey, value) {
+				if (typeof value === 'undefined') value = null;
+				localStorage.setItem(storageKey, JSON.stringify(value));
+			}
+		}
+	};
+	
 	function TrackedRender(data, synchronous) {
 		let mergeTracked;
 		let updateFunctions = [];
@@ -789,7 +850,7 @@ let Matsui = (() => {
 			if (newData !== data) setData(newData);
 			sendUpdate(mergeObj, true);
 		};
-		this.replace = newData => {
+		this.setData = newData => {
 			let mergeObj = merge.make(data, newData);
 			setData(newData);
 			sendUpdate(mergeObj, true);
@@ -829,22 +890,52 @@ let Matsui = (() => {
 			} else {
 				host.append(node);
 			}
-		}
+		};
 		this.addTo = (element, templateOrSet, template) => {
 			addBinding(element, templateOrSet, template, false);
 			return this;
-		}
+		};
 		this.replace = (element, templateOrSet, template) => {
 			addBinding(element, templateOrSet, template, true);
 			return this;
-		}
+		};
+		
+		this.sync = spec => {
+			let thisTracked = this;
+			for (let key in spec) {
+				let sync = api.sync[key];
+				if (!sync) throw Error('Unknown sync method: ' + key);
+				function addSync(syncKey, dataKey) {
+					let updateFn = () => {
+						let merge = sync.read(syncKey, mergeTracked[dataKey]);
+						if (typeof merge !== 'undefined') {
+							thisTracked.merge({[dataKey]: merge});
+						}
+					};
+					sync.setup(updateFn);
+					updateFn();
+					thisTracked.track(merge => {
+						if (!merge || dataKey in merge) sync.write(syncKey, mergeTracked[dataKey]);
+					}, true);
+				}
+
+				let dataSpec = spec[key];
+				if (typeof dataSpec === 'string') {
+					addSync(key, dataSpec);
+				} else {
+					for (let syncKey in dataSpec) {
+						addSync(syncKey, dataSpec[syncKey]);
+					}
+				}
+			}
+		};
 	}
 	
-
 	let api = {
 		merge: merge,
 		access: access,
 		combineUpdates: combineUpdates,
+		sync: sync,
 
 		global: globalSet,
 		wrap: data => new TrackedRender(data),
