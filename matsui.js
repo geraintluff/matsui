@@ -186,14 +186,17 @@ let Matsui = (() => {
 		
 		let updateAccess = [];
 
+		let prevData = null;
 		return data => {
 			data = access.pierce(data);
 			
-			if (firstRun) { // run everything the first time
+			let withoutMerge = merge.withoutHidden(data); // strip the merge info, which should force a full render
+			if (firstRun || prevData !== withoutMerge) { // run everything the first time
+				prevData = isObject(withoutMerge) ? withoutMerge : null;
 				firstRun = false;
 				updateFunctions.forEach((fn, index) => {
 					let trackerObj = updateAccess[index] = {};
-					let tracked = access.tracked(data, trackerObj);
+					let tracked = access.tracked(withoutMerge, trackerObj);
 					fn(tracked);
 				});
 				return;
@@ -265,6 +268,7 @@ let Matsui = (() => {
 				node.childNodes.forEach((child, index) => {
 					if (child.tagName === 'TEMPLATE') {
 						let childTemplate = templateFromElementPlaceholders(child.content, placeholderMap, templateSet);
+						child[templateCache] = childTemplate;
 
 						for (let attr of child.attributes) {
 							if (attr.name[0] === '@') {
@@ -277,6 +281,7 @@ let Matsui = (() => {
 									}).join("");
 								};
 								if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
+									// TODO: use m_value directly?  Also assert that it's a function
 									getValue = (data, ...args) => {
 										return contents[1].m_value(data, ...args);
 									};
@@ -288,7 +293,8 @@ let Matsui = (() => {
 							}
 						}
 
-						if (childTemplate) {
+						let name = child.id || child.getAttribute('name');
+						if (childTemplate && !name) { // if it's named, it's not for immediate use
 							setup.push({
 								m_path: nodePath.concat(index),
 								m_fn: (node, updates, innerTemplate, getData) => {
@@ -297,6 +303,8 @@ let Matsui = (() => {
 									updates.push(combineUpdates(binding.updates));
 								}
 							});
+						} else {
+							child.replaceWith(makePlaceholderNode());
 						}
 					} else {
 						walk(child, nodePath.concat(index));
@@ -335,7 +343,6 @@ let Matsui = (() => {
 			if (node.attributes) {
 				for (let attr of node.attributes) {
 					if (attr.name[0] === '$') {
-						// TODO: register special handlers
 						let name = attr.name.substr(1);
 						let contents = expandPlaceholders(attr.value) || [attr.value];
 
@@ -373,7 +380,7 @@ let Matsui = (() => {
 								if (('on' + name) in node) {
 									cacheLatestData = true;
 									node.addEventListener(name, e => {
-										getValue(getData(), e);
+										getValue(getData(), e, node);
 									});
 								} else {
 									updates.push(data => {
@@ -571,8 +578,8 @@ let Matsui = (() => {
 					// scan for sub-templates
 					node.childNodes.forEach(child => {
 						if (child.nodeType !== 1) return;
-						let name = child.id || child.getAttribute('name');
 						if (child.tagName === 'TEMPLATE') {
+							let name = child.id || child.getAttribute('name');
 							for (let attr of child.attributes) {
 								if (attr.name[0] === '@') {
 									attr.value = replaceString(attr.value, templateSet);
@@ -581,11 +588,11 @@ let Matsui = (() => {
 							if (name) {
 								if (!childSet) childSet = templateSet.extend();
 								childSet.add(name, innerTmpl => {
-									// it will be cached on the child element
-									return templateSet.fromElement(child)(innerTmpl);
+									// it will be cached on the child element by the time this is called
+									return child[templateCache](innerTmpl);
 								});
 							}
-							walk(child.content, templateSet);
+							walk(child.content, templateSet); // substitute the functions etc. in the same pass
 						}
 					});
 					if (childSet) templateSet = childSet;
@@ -674,7 +681,6 @@ let Matsui = (() => {
 		return {
 			node: textNode,
 			updates: [data => {
-//				if (isObject(data)) data = JSON.stringify(data);
 				textNode.nodeValue = (data == null) ? "" : data;
 			}]
 		};
@@ -705,18 +711,19 @@ let Matsui = (() => {
 			return sep;
 		};
 		
+		//let prevData = null;
 		return {
 			node: fragment,
 			updates: [data => {
 				data = access.pierce(data); // stop access-tracking here, so individual keys/items don't end up in the access-tracking map.  We're happy to be called more often because we use the hidden merge to do partial updates anyway
 				let mergeValue = merge.getHidden(data, noChangeSymbol);
+				if (mergeValue === noChangeSymbol) return;
 				
 				if (Array.isArray(data)) {
 					if (!updateList) {
 						clear();
 						updateList = [];
 					}
-					if (!mergeValue || mergeValue == noChangeSymbol) return;
 					
 					// remove old entries
 					while (updateList.length > data.length) {
@@ -742,20 +749,22 @@ let Matsui = (() => {
 			}]
 		};
 	});
+	globalSet.directives.data = (template, dataFn, templateSet) => {
+		if (dataFn == '') dataFn = (x => x);
+		if (typeof dataFn != 'function') throw Error("needs a data-function argument");
+		return innerTemplate => {
+			let binding = template(innerTemplate);
+			let combined = combineUpdates(binding.updates);
+			binding.updates = [data => {
+				combined(dataFn(data));
+			}];
+			return binding;
+		};
+	};
 	globalSet.directives.foreach = (template, dataFn, templateSet) => {
 		let list = templateSet.getNamed('list');
-		if (dataFn == '') dataFn = (x => x);
-		if (typeof dataFn != 'function') throw Error("@foreach needs a data-function argument");
-		return innerTemplate => {
-			let binding = list(_ => template(innerTemplate));
-			return {
-				node: binding.node,
-				updates: [data => {
-					let subData = dataFn(data);
-					binding.updates.forEach(fn => fn(subData));
-				}]
-			};
-		};
+		let listTemplate = innerTemplate => list(_ => template(innerTemplate));
+		return globalSet.directives.data(listTemplate, dataFn, templateSet);
 	};
 	
 	let sync = {
