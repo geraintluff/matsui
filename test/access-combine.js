@@ -66,6 +66,10 @@ Test("combining updates", (api, pass, fail, assert) => {
 		let withMerge = api.merge.addHidden(data, mergeObj);
 		combined(withMerge);
 	};
+	let updateWithDataMerge = (dataObj, mergeObj) => {
+		let withMerge = api.merge.addHidden(dataObj, mergeObj);
+		combined(withMerge);
+	};
 	updateWithMerge({bar: 5, bink: "BINK"}); // call with anything
 	assert.deepEqual(callCount(), [1, 1, 1, 1, 1, 1, 1, 1]);
 
