@@ -549,7 +549,7 @@ let Matsui = (() => {
 			throw Error("No template for data");
 		}
 		
-		fromElement(element) {
+		fromElement(element, preventEval) {
 			if (typeof element === 'string') {
 				let el = document.querySelector(element);
 				if (!el) throw Error("Invalid element:" + element);
@@ -557,13 +557,13 @@ let Matsui = (() => {
 			}
 			if (element[templateCache]) return element[templateCache];
 			
-			let placeholderMap = {};
-			let placeholderIndex = 0;
+			let placeholderMap = isObject(preventEval) ? preventEval : {};
+			let placeholderIndex = Object.keys(placeholderMap).length;
 
 			let replaceString = (text, templateSet) => text.replace(/((\$[a-z_-]+)*)(\$?)\{([^\{\}]*)\}/ig, (all, prefix, _, $, match) => {
 				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
 				let value = (data => isObject(data) ? data[match] : null);
-				if ($) {
+				if ($ && !preventEval) {
 					// This doesn't work with CSP enabled, and could be confusing to debug either way, so to be helpful we attempt to catch it here
 					try {
 						value = Function('return (' + match + ')')();
@@ -575,16 +575,17 @@ let Matsui = (() => {
 						console.error(e, match);
 						return `{${e.message}}`;
 					}
+					$ = ''; // only use it as a prefix when `preventEval` is active
 				} else if (match == '=') {
 					value = (data => data);
-				} else if (!$ && /\s/.test(match)) {
+				} else if (/\s/.test(match)) {
 					return all;
 				}
 				placeholderMap[placeholder] = {
 					m_template: templateFromIds(templateSet, prefix.split('$').slice(1)),
 					m_value: value
 				};
-				return placeholder;
+				return $ + placeholder;
 			});
 			
 			function walk(node, templateSet) {
@@ -633,23 +634,7 @@ let Matsui = (() => {
 			let placeholderMap = {};
 			let placeholderIndex = 0;
 			
-			let replaceString = text => text.replace(/((\$[a-z_-]+)*){([^\{\}]*)\}/ig, (all, prefixes, _, key) => {
-				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
-				let value = (data => isObject(data) ? data[key] : null);
-				if (key === '=') {
-					value = (data => data);
-				}
-				if (/\s/.test(key)) {
-					return all;
-				}
-				placeholderMap[placeholder] = {
-					m_template: templateFromIds(this, prefixes.split('$').slice(1)),
-					m_value: value
-				}
-				return placeholder;
-			});
-
-			let parts = [replaceString(strings[0])];
+			let parts = [strings[0]];
 			for (let i = 0; i < values.length; ++i) {
 				if (typeof values[i] === 'function') {
 					let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
@@ -658,7 +643,7 @@ let Matsui = (() => {
 						m_value: values[i]
 					};
 					// Steal prefixes from the previous string
-					parts[parts.length - 1] = parts[parts.length - 1].replace(/(\$[a-z_-]+)*$/, prefixes => {
+					parts[i] = parts[i].replace(/(\$[a-z_-]+)*$/, prefixes => {
 						entry.m_template = templateFromIds(this, prefixes.split('$').slice(1));
 						return "";
 					});
@@ -668,12 +653,12 @@ let Matsui = (() => {
 					parts.push(values[i] + "");
 				}
 				
-				parts.push(replaceString(strings[i + 1]));
+				parts.push(strings[i + 1]);
 			}
 			
 			let element = document.createElement('template');
 			element.innerHTML = parts.join("");
-			return templateFromElementPlaceholders(element, placeholderMap, this);
+			return this.fromElement(element, placeholderMap);
 		}
 	}
 

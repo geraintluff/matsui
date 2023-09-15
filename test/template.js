@@ -151,7 +151,7 @@ Test("combined updates", (api, pass, fail, assert) => {
 
 }, {document: true});
 
-Test("parse from element/tag", (api, pass, fail, assert) => {
+Test("parse from element", (api, pass, fail, assert) => {
 	let customTextTemplate = innerTemplate => {
 		let node = document.createTextNode("");
 		return {
@@ -192,6 +192,57 @@ Test("parse from element/tag", (api, pass, fail, assert) => {
 	`;
 	templateSet.addElement('named-div', divElement);
 	let divTemplate = templateSet.getNamed('named-div');
+	
+	function testTemplate(template) {
+		let binding = template(customTextTemplate);
+		let combined = Matsui.combineUpdates(binding.updates);
+		
+		combined({
+			foo: '_foo_',
+			bar: '_bar_',
+			baz: 'BAZ',
+			bing: 'BING'
+		});
+		assert(binding.node.querySelector('.foo').innerHTML == 'string:_foo_');
+		assert(binding.node.querySelector('.foo').title == '_foo_');
+		assert(binding.node.querySelector('.bar').innerHTML == '- string:_bar_ -');
+		assert(binding.node.querySelector('.bar').title == 'prefix|_bar_|suffix');
+		// not processed because the attribute doesn't start with $
+		assert(binding.node.querySelector('.foo').dataset.other == '{foo}');
+
+		assert(binding.node.querySelector('.baz').innerHTML == '$: number:5 :$');
+		assert(binding.node.querySelector('.baz').title == '!baz?');
+		assert(binding.node.querySelector('.bing').innerHTML === '#number:8#');
+		assert(binding.node.querySelector('.bing').x_value === 4);
+	}
+
+	testTemplate(elementTemplate);
+	testTemplate(divTemplate);
+	// changes are made on the actual parsed node
+	assert(divElement.querySelector('.foo').innerHTML === 'string:_foo_');
+
+	pass();
+
+}, {document: true, csp: false});
+
+Test("parse from tag", (api, pass, fail, assert) => {
+	let customTextTemplate = innerTemplate => {
+		let node = document.createTextNode("");
+		return {
+			node: node,
+			updates: [data => {
+				node.nodeValue = (typeof data) + ":" + data;
+			}]
+		}
+	};
+	let templateSet = Matsui.global.extend();
+	templateSet.attributes['assert-number'] = (node, valueFn) => {
+		return data => {
+			let value = valueFn(data);
+			assert(typeof value === 'number');
+			node.x_value = value;
+		};
+	};
 
 	let tagTemplate = templateSet.fromTag`
 		<div class="foo" $title="{foo}" data-other="{foo}">{foo}</div>
@@ -226,7 +277,7 @@ Test("parse from element/tag", (api, pass, fail, assert) => {
 		assert(binding.node.querySelector('.bar').innerHTML == '- string:_bar_ -');
 		assert(binding.node.querySelector('.bar').title == 'prefix|_bar_|suffix');
 		// not processed because the attribute doesn't start with $
-		//assert(binding.node.querySelector('.foo').dataset.other == '{foo}');
+		assert(binding.node.querySelector('.foo').dataset.other == '{foo}');
 
 		assert(binding.node.querySelector('.baz').innerHTML == '$: number:5 :$');
 		assert(binding.node.querySelector('.baz').title == '!baz?');
@@ -234,15 +285,10 @@ Test("parse from element/tag", (api, pass, fail, assert) => {
 		assert(binding.node.querySelector('.bing').x_value === 4);
 	}
 
-	testTemplate(elementTemplate);
-	testTemplate(divTemplate);
-	// changes are made on the actual parsed node
-	assert(divElement.querySelector('.foo').innerHTML === 'string:_foo_');
-
 	testTemplate(tagTemplate);
 	testTemplate(tagTemplateNamed);
 
 	pass();
 
-}, {document: true, csp: false});
+}, {document: true, csp: true});
 
