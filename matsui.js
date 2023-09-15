@@ -766,6 +766,36 @@ let Matsui = (() => {
 		let listTemplate = innerTemplate => list(_ => template(innerTemplate));
 		return globalSet.directives.data(listTemplate, dataFn, templateSet);
 	};
+	globalSet.directives['if'] = (conditionalTemplate, dataFn, templateSet) => {
+		return innerTemplate => {
+			let start = makePlaceholderNode();
+			let end = makePlaceholderNode();
+			let node = document.createDocumentFragment();
+			node.append(start, end);
+
+			let conditionalUpdates = null;
+			return {
+				node: node,
+				updates: [data => {
+					if (dataFn(data)) {
+						if (!conditionalUpdates) {
+							let binding = conditionalTemplate(innerTemplate);
+							end.before(binding.node);
+							conditionalUpdates = combineUpdates(binding.updates);
+						}
+						conditionalUpdates(data);
+					} else {
+						if (conditionalUpdates) {
+							while (start.nextSibling && start.nextSibling != end) {
+								start.nextSibling.remove();
+							}
+							conditionalUpdates = null;
+						}
+					}
+				}]
+			};
+		};
+	};
 	
 	let sync = {
 		hash: {
