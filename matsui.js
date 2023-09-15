@@ -6,6 +6,7 @@ let Matsui = (() => {
 	/*--- JSON Patch Merge stuff ---*/
 
 	// Attach a hidden merge to data, which use later to decide what to re-render
+	let rawKey = Symbol();
 	let hiddenMergeKey = Symbol(), hiddenMergePierceKey = Symbol();
 	let noChangeSymbol = Symbol('no change');
 
@@ -83,6 +84,7 @@ let Matsui = (() => {
 			return new Proxy(data, {
 				get(obj, prop) {
 					let value = obj[prop];
+					if (prop == rawKey) return obj;
 					if (!isObject(value)) return value;
 					return merge.tracked(
 						value,
@@ -93,6 +95,7 @@ let Matsui = (() => {
 				},
 				set(obj, prop, value, proxy) {
 					if (value == null) return (delete proxy[prop]);
+					value = getRaw(value);
 					let oldValue = obj[prop];
 					if (Reflect.set(obj, prop, value)) {
 						updateFn({
@@ -118,7 +121,7 @@ let Matsui = (() => {
 			return new Proxy(data, {
 				get(obj, prop) {
 					if (prop == hiddenMergeKey) return mergeObj;
-					if (prop == hiddenMergePierceKey) return obj;
+					if (prop == hiddenMergePierceKey || prop == rawKey) return obj;
 					let value = obj[prop];
 					let hasChange = isObject(mergeObj) && (prop in mergeObj);
 					return merge.addHidden(value, hasChange ? mergeObj[prop] : noChangeSymbol);
@@ -142,6 +145,16 @@ let Matsui = (() => {
 	};
 
 	/*--- Access-tracking ---*/
+	
+	function getRaw(value) {
+		if (!isObject(value)) return value;
+		let raw = value[rawKey];
+		while (raw && raw != value) {
+			value = raw;
+			raw = value[rawKey];
+		}
+		return value;
+	}
 
 	let pierceKey = Symbol();
 	let accessedKey = Symbol("accessed");
@@ -155,6 +168,7 @@ let Matsui = (() => {
 			let proxy = new Proxy(data, {
 				get(obj, prop) {
 					let value = obj[prop];
+					if (prop == rawKey) return obj;
 					if (prop == pierceKey) {
 						trackerObj[accessedKey] = accessedKey;
 						return data;
@@ -191,8 +205,9 @@ let Matsui = (() => {
 			data = access.pierce(data);
 			
 			let withoutMerge = merge.withoutHidden(data); // strip the merge info, which should force a full render
-			if (firstRun || prevData !== withoutMerge) { // run everything the first time
-				prevData = isObject(withoutMerge) ? withoutMerge : null;
+			let rawData = getRaw(withoutMerge); // strip all proxies to try and get a uniquely identifiable object
+			if (firstRun || prevData !== rawData) { // run everything the first time
+				prevData = isObject(rawData) ? rawData : null;
 				firstRun = false;
 				updateFunctions.forEach((fn, index) => {
 					let trackerObj = updateAccess[index] = {};
@@ -711,7 +726,6 @@ let Matsui = (() => {
 			return sep;
 		};
 		
-		//let prevData = null;
 		return {
 			node: fragment,
 			updates: [data => {
