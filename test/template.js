@@ -84,8 +84,6 @@ Test("list", (api, pass, fail, assert) => {
 }, {document: true});
 
 Test("combined updates", (api, pass, fail, assert) => {
-	let itemConstructionCount = 0;
-	
 	let fallbackTemplate = () => {
 		throw new Error("Shouldn't be called");
 	};
@@ -152,4 +150,99 @@ Test("combined updates", (api, pass, fail, assert) => {
 	pass();
 
 }, {document: true});
+
+Test("parse from element/tag", (api, pass, fail, assert) => {
+	let customTextTemplate = innerTemplate => {
+		let node = document.createTextNode("");
+		return {
+			node: node,
+			updates: [data => {
+				node.nodeValue = (typeof data) + ":" + data;
+			}]
+		}
+	};
+	let templateSet = Matsui.global.extend();
+	templateSet.attributes['assert-number'] = (node, valueFn) => {
+		return data => {
+			let value = valueFn(data);
+			assert(typeof value === 'number');
+			node.x_value = value;
+		};
+	};
+
+	let element = document.createElement('template');
+	element.innerHTML = `
+		<div class="foo" $title="{foo}" data-other="{foo}">{foo}</div>
+		<div class="bar" $title="prefix|{bar}|suffix">- {bar} -</div>
+
+		<div class="baz" $title="!\${d => d.baz.toLowerCase()}?" data-other="\${d=>d}">$: \${d => 5} :$</div>
+		<!-- attributes with just a single entry aren't converted to strings -->
+		<div class="bing" $assert-number="\${d=>d.bing.length}">#\${d=>d.bing.length*2}#</div>
+	`;
+	let elementTemplate = templateSet.fromElement(element);
+
+	let divElement = document.createElement('div');
+	divElement.innerHTML = `
+		<div class="foo" $title="{foo}" data-other="{foo}">{foo}</div>
+		<div class="bar" $title="prefix|{bar}|suffix">- {bar} -</div>
+
+		<div class="baz" $title="!\${d => d.baz.toLowerCase()}?" data-other="\${d=>d}">$: \${d => 5} :$</div>
+		<!-- attributes with just a single entry aren't converted to strings -->
+		<div class="bing" $assert-number="\${d=>d.bing.length}">#\${d=>d.bing.length*2}#</div>
+	`;
+	templateSet.addElement('named-div', divElement);
+	let divTemplate = templateSet.getNamed('named-div');
+
+	let tagTemplate = templateSet.fromTag`
+		<div class="foo" $title="{foo}" data-other="{foo}">{foo}</div>
+		<div class="bar" $title="prefix|{bar}|suffix">- {bar} -</div>
+
+		<div class="baz" $title="!${d => d.baz.toLowerCase()}?" data-other="${d=>d}">$: ${d => 5} :$</div>
+		<!-- attributes with just a single entry aren't converted to strings -->
+		<div class="bing" $assert-number="${d=>d.bing.length}">#${d=>d.bing.length*2}#</div>
+	`;
+	templateSet.addTag("named-tag")`
+		<div class="foo" $title="{foo}" data-other="{foo}">{foo}</div>
+		<div class="bar" $title="prefix|{bar}|suffix">- {bar} -</div>
+
+		<div class="baz" $title="!${d => d.baz.toLowerCase()}?" data-other="${d=>d}">$: ${d => 5} :$</div>
+		<!-- attributes with just a single entry aren't converted to strings -->
+		<div class="bing" $assert-number="${d=>d.bing.length}">#${d=>d.bing.length*2}#</div>
+	`;
+	let tagTemplateNamed = templateSet.getNamed("named-tag");
+	
+	function testTemplate(template) {
+		let binding = template(customTextTemplate);
+		let combined = Matsui.combineUpdates(binding.updates);
+		
+		combined({
+			foo: '_foo_',
+			bar: '_bar_',
+			baz: 'BAZ',
+			bing: 'BING'
+		});
+		assert(binding.node.querySelector('.foo').innerHTML == 'string:_foo_');
+		assert(binding.node.querySelector('.foo').title == '_foo_');
+		assert(binding.node.querySelector('.bar').innerHTML == '- string:_bar_ -');
+		assert(binding.node.querySelector('.bar').title == 'prefix|_bar_|suffix');
+		// not processed because the attribute doesn't start with $
+		//assert(binding.node.querySelector('.foo').dataset.other == '{foo}');
+
+		assert(binding.node.querySelector('.baz').innerHTML == '$: number:5 :$');
+		assert(binding.node.querySelector('.baz').title == '!baz?');
+		assert(binding.node.querySelector('.bing').innerHTML === '#number:8#');
+		assert(binding.node.querySelector('.bing').x_value === 4);
+	}
+
+	testTemplate(elementTemplate);
+	testTemplate(divTemplate);
+	// changes are made on the actual parsed node
+	assert(divElement.querySelector('.foo').innerHTML === 'string:_foo_');
+
+	testTemplate(tagTemplate);
+	testTemplate(tagTemplateNamed);
+
+	pass();
+
+}, {document: true, csp: false});
 
