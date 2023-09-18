@@ -269,20 +269,33 @@ let Matsui = (() => {
 		
 		let expandPlaceholders = string => {
 			let contents = [];
-			let prevIndex = placeholderRegex.lastIndex = 0;
+			let prevIndex = 0; // the .lastIndex is already reset to 0 when .exec() returns null
 			for (let match; match = placeholderRegex.exec(string);) {
 				// Add the string prefix/separator
-				contents.push(string.substr(prevIndex, match.index - prevIndex));
+				let prefix = string.substr(prevIndex, match.index - prevIndex)
+				if (prefix) contents.push(prefix);
 				prevIndex = placeholderRegex.lastIndex;
-				
-				// Look the value up in the placeholder map
-				let entry = placeholderMap[match[0]];
-				contents.push(entry);
+				// Add the value from the placeholder map
+				contents.push(placeholderMap[match[0]]);
 			}
 			if (contents.length) {
-				contents.push(string.substr(prevIndex));
+				let suffix = string.substr(prevIndex);
+				if (suffix) contents.push(suffix);
 				return contents;
 			}
+		};
+		let expandAttribute = attrValue => {
+			let contents = expandPlaceholders(attrValue) || [attrValue];
+			
+			if (contents.length == 1 && typeof contents[0] != 'string') {
+				return contents[0].m_value;
+			}
+			return (data, ...args) => {
+				return contents.map(entry => {
+					if (typeof entry === 'string') return entry;
+					return entry.m_value(data, ...args);
+				}).join("");
+			};
 		};
 
 		function walk(node, nodePath) {
@@ -294,20 +307,7 @@ let Matsui = (() => {
 
 						for (let attr of child.attributes) {
 							if (attr.name[0] === '@') {
-								let contents = expandPlaceholders(attr.value) || [attr.value];
-							
-								let getValue = (data, ...args) => {
-									return contents.map(entry => {
-										if (typeof entry === 'string') return entry;
-										return entry.m_value(data, ...args);
-									}).join("");
-								};
-								if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
-									// TODO: use m_value directly?  Also assert that it's a function
-									getValue = (data, ...args) => {
-										return contents[1].m_value(data, ...args);
-									};
-								}
+								let getValue = expandAttribute(attr.value);
 								
 								let transform = templateSet.transforms[attr.name.substr(1)];
 								if (typeof transform !== 'function') throw Error("Unknown transform: " + attr.name);
@@ -316,7 +316,7 @@ let Matsui = (() => {
 						}
 
 						let name = child.id || child.getAttribute('name');
-						if (childTemplate && !name) { // if it's named, it's not for immediate use
+						if (childTemplate && !name) { // if it's unnamed, it's for immediate use
 							setup.push({
 								m_path: nodePath.concat(index),
 								m_fn: (node, updates, innerTemplate, getData) => {
@@ -348,7 +348,7 @@ let Matsui = (() => {
 									updates.push(data => {
 										let itemData;
 										try {
-											itemData = entry.m_value(data); // item is the mapping function
+											itemData = entry.m_value(data);
 										} catch (e) {
 											itemData = e.message;
 										}
@@ -366,19 +366,8 @@ let Matsui = (() => {
 				for (let attr of node.attributes) {
 					if (attr.name[0] === '$') {
 						let name = attr.name.substr(1);
-						let contents = expandPlaceholders(attr.value) || [attr.value];
+						let getValue = expandAttribute(attr.value);
 
-						let getValue = (data, ...args) => {
-							return contents.map(entry => {
-								if (typeof entry === 'string') return entry;
-								return entry.m_value(data, ...args);
-							}).join("");
-						};
-						if (contents.length == 3 && contents[0] == '' && contents[2] == '') {
-							getValue = (data, ...args) => {
-								return contents[1].m_value(data, ...args);
-							};
-						}
 						setup.push({
 							m_path: nodePath,
 							m_fn: (node, updates, innerTemplate, getData) => {
@@ -567,33 +556,85 @@ let Matsui = (() => {
 			let placeholderMap = isObject(preventEval) ? preventEval : {};
 			let placeholderIndex = Object.keys(placeholderMap).length;
 
-			let replaceString = (text, templateSet) => text.replace(/((\$[a-z_-]+)*)(\$?)\{([^\{\}]*)\}/ig, (all, prefix, _, $, match) => {
-				let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
-				let value = (data => isObject(data) ? data[match] : null);
-				if ($ && !preventEval) {
-					// This doesn't work with CSP enabled, and could be confusing to debug either way, so to be helpful we attempt to catch it here
-					try {
-						value = Function('return (' + match + ')')();
-						if (typeof value !== 'function') {
-							console.error("Should be a function:", value);
-							value = '{' + JSON.stringify(value) + '}';
-						}
-					} catch (e) {
-						console.error(e, match);
-						return `{${e.message}}`;
+			let replaceString = (text, templateSet) => {
+				let result = [];
+				let start = /((\$[a-z_-]+)*)(\$?)\{/gi;
+				for (;;) {
+					let startLiteral = start.lastIndex;
+					let match = start.exec(text);
+					if (!match) {
+						result.push(text.substr(startLiteral));
+						break;
 					}
-					$ = ''; // only use it as a prefix when `preventEval` is active
-				} else if (match == '=') {
-					value = (data => data);
-				} else if (/\s/.test(match)) {
-					return all;
+					result.push(text.substr(startLiteral, match.index - startLiteral));
+					
+					let valueEntry = fn => {
+						let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
+						placeholderMap[placeholder] = {
+							m_template: templateFromIds(
+								this,
+								match[1].split('$').slice(1)
+							),
+							m_value: fn
+						};
+						result.push(placeholder);
+					};
+
+					let startExpr = start.lastIndex, endExpr = startExpr;
+					if (match[3]) { // ${...} expression
+						if (preventEval) {
+							result.push(match[0]);
+							continue;
+						}
+						let stack = ['}'];
+						while (endExpr < text.length && stack.length) {
+							let closeChar = stack[stack.length - 1];
+							let c = text[endExpr++];
+							if (c == '\\') {
+								++endExpr;
+							} else if (c == closeChar) {
+								stack.pop();
+							} else if (closeChar == '`') {
+								if (c == '$' && text[endExpr + 1] == "{") {
+									stack.push("}");
+									++endExpr;
+								}
+							} else if (closeChar != '"' && closeChar != "'") {
+								if (c == '{') {
+									stack.push("}");
+								} else if (c == '"' || c == "'" || c == '`') {
+									stack.push(c);
+								}
+							}
+						}
+						let expr = text.substr(startExpr, endExpr - startExpr - 1);
+						try { // As well as syntax errors, will fail under CSP, so catch to be helpful
+							valueEntry(new Function('return(' + expr + ')')());
+						} catch (e) {
+							console.error(e);
+							result.push(`${e.message}`);
+						}
+						start.lastIndex = endExpr;
+					} else { // A plain {...} expression
+						if (text.substr(startExpr, 2) == '=}') {
+							valueEntry(d => d);
+							start.lastIndex += 2;
+						} else {
+							while (/[a-z_-]/i.test(text[endExpr])) {
+								++endExpr;
+							};
+							if (endExpr > startExpr && text[endExpr] === '}') {
+								let key = text.substr(startExpr, endExpr - startExpr);
+								valueEntry(d => d[key]);
+								start.lastIndex += key.length + 1;
+							} else {
+								result.push(match[0]);
+							}
+						}
+					}
 				}
-				placeholderMap[placeholder] = {
-					m_template: templateFromIds(templateSet, prefix.split('$').slice(1)),
-					m_value: value
-				};
-				return $ + placeholder;
-			});
+				return result.join("");
+			};
 			
 			function walk(node, templateSet) {
 				if (node.childNodes) {
@@ -906,7 +947,7 @@ let Matsui = (() => {
 			if (!host) throw Error("invalid host");
 
 			if (typeof template === 'string') {
-				template = document.querySelector(templateOrSet);
+				template = document.querySelector(template);
 				if (template) template = globalSet.fromElement(template);
 			}
 

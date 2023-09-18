@@ -2,20 +2,36 @@
 <html>
 	<head>
 		<title>Matsui tests</title>
+		<meta charset="utf8">
 		<template id="title-suffix">: {message}</template>
 		<!--<meta http-equiv="Content-Security-Policy" content="default-src 'self'">-->
-		<meta charset="utf8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 	</head>
 	<body>
-		<script src="../matsui.js"></script>
+		<script>
+			let usingMinified = /\?minified/.test(location.href);
+			document.write(`<script src="../matsui${usingMinified ? '.min' : ''}.js"></${'script'}>`);
+		</script>
 		<script>
 			let api = Matsui;
 			let suiteKeys = ['template', 'merge', 'merge-tracked', 'merge-hidden', 'access', 'access-combine'];
 		</script>
 
 		<script>
-			let renderData = {message: 'loading...', failed: false};
+			function mapStatus(status) {
+				return {
+					waiting: ' ',
+					running: '➡️',
+					passed: '✅',
+					failed: '❌',
+				}[status] || status;
+			}
+
+			let renderData = {
+				message: 'loading...',
+				failed: false,
+				minified: usingMinified
+			};
 
 			let scriptMap = new WeakMap();
 			function Suite(name) {
@@ -198,17 +214,6 @@
 			}
 		</script>
 
-		<script>
-			function mapStatus(status) {
-				return {
-					waiting: ' ',
-					running: '➡️',
-					passed: '✅',
-					failed: '❌',
-				}[status] || status;
-			}
-		</script>
-		
 		<template id="tests-template">
 			<table class="tests">
 				<template @forEach="{=}">
@@ -223,9 +228,24 @@
 		<template id="test-runner-template">
 			<div id="message-container">
 				<iframe id="iframe-runner"></iframe>
-				<div id="message">{message}</div>
+				<div id="message">
+					<!-- checkbox to test minified version -->
+					<label class="minified-check">
+						<code>matsui${d => d.minified ? '.min.js' : '.js'}</code>
+						<input type="checkbox"
+							$checked="{minified}"
+							$change="${data =>
+								location.replace(data.minified ?
+									location.href.replace(/\?minified/, '')
+									: location.href.replace(/\??$/, '?minified')
+								)
+							}"
+						>
+					</label>
+					{message}
+				</div>
 			</div>
-<!--			$list$suite-template{suites}-->
+
 			<table class="suites">
 				<template @forEach="{suites}">
 					<tr class="header">
@@ -273,6 +293,10 @@
 				}
 				#message {
 					position: relative;
+				}
+				#message .minified-check {
+					float: right;
+					user-select: none;
 				}
 				
 				.suites {

@@ -225,6 +225,32 @@ Test("parse from element", (api, pass, fail, assert) => {
 
 }, {document: true, csp: false});
 
+Test("from element with {} inside ${}", (api, pass, fail, assert) => {
+	let element = document.createElement('template');
+	element.innerHTML = `
+		<div>$json\${ data => ({foo: data}) }</div>
+	`;
+	let template = Matsui.global.fromElement(element);
+
+	let fallbackTemplate = () => {
+		throw new Error("Shouldn't be called");
+	};
+
+	let binding = template(fallbackTemplate);
+	let div = binding.node.querySelector('div');
+
+	let combined = Matsui.combineUpdates(binding.updates);
+	combined(1);
+	assert(div.innerHTML == `{"foo":1}`);
+	combined([1, 2, 3]);
+	assert(div.innerHTML == `{"foo":[1,2,3]}`);
+	combined("bar");
+	assert(div.innerHTML == `{"foo":"bar"}`);
+
+	pass();
+
+}, {document: true, csp: false});
+
 Test("parse from tag", (api, pass, fail, assert) => {
 	let customTextTemplate = innerTemplate => {
 		let node = document.createTextNode("");
