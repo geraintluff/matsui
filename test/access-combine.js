@@ -126,3 +126,29 @@ Test("combining updates", (api, pass, fail, assert) => {
 	}
 	pass()
 });
+
+Test("combining a combined update", (api, pass, fail, assert) => {
+	let updateCount = 0;
+	let updates = [
+		data => updateCount++
+	];
+	
+	let combined = api.combineUpdates(updates);
+	assert(combined !== updates[0]);
+	combined();
+	assert(updateCount === 1);
+	combined();
+	assert(updateCount === 2);
+	
+	let combined2 = api.combineUpdates([combined]);
+	assert(combined2 === combined); // it shouldn't wrap it twice
+	combined2();
+	assert(updateCount === 3);
+
+	let combined3 = api.combineUpdates([combined, combined]);
+	assert(combined3 !== combined);
+	combined3();
+	assert(updateCount === 5); // calls things twice
+	
+	pass();
+});

@@ -195,13 +195,18 @@ let Matsui = (() => {
 
 	/*--- Rendering stuff ---*/
 
+	let isCombinedKey = Symbol();
 	let combineUpdates = updateFunctions => {
+		if (updateFunctions.length === 1 && updateFunctions[0][isCombinedKey]) {
+			// Already a list with just a single combined function
+			return updateFunctions[0];
+		}
 		let firstRun = true;
 		
 		let updateAccess = [];
 
 		let prevData = null;
-		return data => {
+		let result = data => {
 			data = access.pierce(data);
 			
 			let withoutMerge = merge.withoutHidden(data); // strip the merge info, which should force a full render
@@ -236,6 +241,8 @@ let Matsui = (() => {
 				}
 			});
 		};
+		result[isCombinedKey] = isCombinedKey;
+		return result;
 	}
 
 	/*--- Pre-supplied templates and template-construction methods ---*/
@@ -302,9 +309,9 @@ let Matsui = (() => {
 									};
 								}
 								
-								let directive = templateSet.directives[attr.name.substr(1)];
-								if (typeof directive !== 'function') throw Error("Unknown directive: " + attr.name);
-								childTemplate = directive(childTemplate, getValue, templateSet);
+								let transform = templateSet.transforms[attr.name.substr(1)];
+								if (typeof transform !== 'function') throw Error("Unknown transform: " + attr.name);
+								childTemplate = transform(childTemplate, getValue, templateSet);
 							}
 						}
 
@@ -449,13 +456,13 @@ let Matsui = (() => {
 	let templateCache = Symbol();
 	class TemplateSet {
 		attributes = {};
-		directives = {};
+		transforms = {};
 	
 		constructor(parent) {
 			this.#parent = parent;
 			if (parent) {
 				this.attributes = Object.create(parent.attributes);
-				this.directives = Object.create(parent.directives);
+				this.transforms = Object.create(parent.transforms);
 			}
 
 			/* Switches between templates, based on the filtered list */
@@ -748,7 +755,7 @@ let Matsui = (() => {
 			}]
 		};
 	});
-	globalSet.directives.data = (template, dataFn, templateSet) => {
+	globalSet.transforms.data = (template, dataFn, templateSet) => {
 		if (dataFn == '') dataFn = (x => x);
 		if (typeof dataFn != 'function') throw Error("needs a data-function argument");
 		return innerTemplate => {
@@ -760,12 +767,12 @@ let Matsui = (() => {
 			return binding;
 		};
 	};
-	globalSet.directives.foreach = (template, dataFn, templateSet) => {
+	globalSet.transforms.foreach = (template, dataFn, templateSet) => {
 		let list = templateSet.getNamed('list');
 		let listTemplate = innerTemplate => list(_ => template(innerTemplate));
-		return globalSet.directives.data(listTemplate, dataFn, templateSet);
+		return globalSet.transforms.data(listTemplate, dataFn, templateSet);
 	};
-	globalSet.directives['if'] = (conditionalTemplate, dataFn, templateSet) => {
+	globalSet.transforms['if'] = (conditionalTemplate, dataFn, templateSet) => {
 		return innerTemplate => {
 			let start = makePlaceholderNode();
 			let end = makePlaceholderNode();
@@ -894,19 +901,22 @@ let Matsui = (() => {
 			sendUpdate(mergeObj, true);
 		};
 		
-		let addBinding = (host, templateOrSet, template, replace) => {
+		let addBinding = (host, template, templateSet, replace) => {
 			if (typeof host === 'string') host = document.querySelector(host);
 			if (!host) throw Error("invalid host");
-			
-			if (typeof templateOrSet === 'string') {
-				templateOrSet = document.querySelector(templateOrSet);
-				if (templateOrSet) templateOrSet = globalSet.fromElement(templateOrSet);
+
+			if (typeof template === 'string') {
+				template = document.querySelector(templateOrSet);
+				if (template) template = globalSet.fromElement(template);
 			}
-			let templateSet = templateOrSet || globalSet;
-			if (typeof templateOrSet === 'function') {
-				template = templateSet;
-				templateSet = globalSet;
+
+			// We might be handed just the template set, but no template
+			if (!templateSet && typeof template != 'function') {
+				templateSet = template;
+				template = null;
 			}
+			templateSet = templateSet || globalSet;
+
 			if (!template) template = templateSet.fromElement(host);
 
 			let bindingInfo = template(templateSet.dynamic);
@@ -929,12 +939,12 @@ let Matsui = (() => {
 				host.append(node);
 			}
 		};
-		this.addTo = (element, templateOrSet, template) => {
-			addBinding(element, templateOrSet, template, false);
+		this.addTo = (element, template, templateSet) => {
+			addBinding(element, template, templateSet, false);
 			return this;
 		};
-		this.replace = (element, templateOrSet, template) => {
-			addBinding(element, templateOrSet, template, true);
+		this.replace = (element, templateOrSet, templateSet) => {
+			addBinding(element, templateOrSet, templateSet, true);
 			return this;
 		};
 		

@@ -73,14 +73,13 @@
 			}
 		</style>
 
-		<template id="matsui-template">
-			<figure class="example-html small"><pre class="language-html"><code>${data => (data.html || '').trim()}</code></pre></figure>
-			<figure class="example-js small"><pre class="language-javascript"><code>${data => (data.js || '').trim().split('\n').map(x => "\t" + x).join("\n")}
-			</code></pre><figcaption>{caption}</figcaption></figure>
-			<figure class="example-result"></figure>
-		</template>
 		<script>
-			let exampleTemplate = Matsui.global.fromElement('#matsui-template');
+			let exampleTemplate = Matsui.global.fromTag`
+				<figure class="example-html small"><pre><code class="language-html">${data => (data.html || '').trim()}</code></pre></figure>
+				<figure class="example-js small"><pre class="language-javascript"><code>${data => (data.js || '').trim().split('\n').map(x => "\t" + x).join("\n")}
+				</code></pre><figcaption>{caption}</figcaption></figure>
+				<figure class="example-result"></figure>
+			`;
 			function matsuiExample(obj) {
 				let container = document.createElement('div');
 				container.className = "example";
@@ -104,61 +103,327 @@
 		</script>
 	</head>
 	<body>
-		<script>
-			if (0) {
-				let nodeObserver = new MutationObserver(records => {
-					records.forEach(record => {
-						if (record.type == "characterData") {
-							console.log("text:", record.target.nodeValue);
-						} else if (record.type == "attribute") {
-							console.log("attr:", record.attributeName, record.target.getAttribute(record.attributeName));
-						} else {
-							console.log("add", record.addedNodes, "remove", record.removedNodes);
-						}
-					});
-				});
-				nodeObserver.observe(document.body, {subtree: true, childList: true, characterData: true});
-			}
-		</script>
+		<!-- log DOM changes -->
+		<script>(e=>new MutationObserver((t=>t.forEach((t=>"characterData"==t.type?e("text:",t.target.nodeValue):"attribute"==t.type?e("attr:",t.attributeName,t.target.getAttribute(t.attributeName)):t.addedNodes.forEach((t=>e("add:",3==t.nodeType?JSON.stringify(t.nodeValue):t)))&&t.removedNodes.forEach((t=>e("remove:",t))))))))(console.log).observe(document.body,{subtree:!0,childList:!0,characterData:!0})</script>
 		<header class="blog"></header>
-		<article class="main full">
+		<article class="main full language-javascript">
 			<header>
 				<h1>Matsui</h1>
 				<img src="Ricky_Matsui.png" style="float:right;height:4rem;width:4rem;margin:-4.5rem 0.25em 0 0;border-radius:5px">
 				<p>Simple data-driven UIs</p>
 			</header>
 			
-			<p>I wanted a framework/library for interactive UIs, but I'm uncomfortable with magic I don't understand, so I made something simple enough for me to explain how it's implemented.</p>
+			<p>I wanted a framework/library for interactive UIs, but all the options felt like they had hidden magic, and I like being able to fully understand the tools I'm using.  So I <a href="https://xkcd.com/927/">wrote my own</a>, with the goals:</p>
+			<ul>
+				<li>simple (to use and understand)</li>
+				<li>only updates where needed</li>
+				<li>plain JavaScript (ES6) in the browser</li>
+				<li>CSP (Content Security Policy) support</li>
+			</ul>
+			
+			<nav class="auto"></nav>
 
+			<h2>Quick start</h2>
+			<p>Include <code>matsui.js</code> (or <code>matsui.min.js</code>) and use the global <code>Matsui</code> variable:</p>
+			<figure><pre class="language-html"><code>
+&lt;script src="matsui.js">&lt;/script>
+</code></pre></figure>
+
+			<h3>Fill out existing nodes in the page</h3>
 			<script>
 				matsuiExample({
-					html: `<script src="matsui.js"></${'script'}>
-
+					html: `
 <div>
-	<div>Counter: {counter}</div>
-	<div>Doubled: \${data => data.counter*2}</div>
-	<button $click="\${data => data.counter++}">
-		add
-	</button>
+	<input $value="{name}" $input="\${
+		(d, e, input) => d.name = input.value
+	}">
+	<p>Hello {name}</p>
 </div>`,
-					js: `Matsui.replace(div, {counter: 0});`,
+					js: `Matsui.replace(div, {name: "you"});`,
+					vars: {
+						div: 'div'
+					}
+				});
+			</script>
+
+			<h3>Tagged template (CSP-compatible)</h3>
+			<script>
+				matsuiExample({
+					html: `
+<div></div>
+`,
+					js: `
+let template = Matsui.global.fromTag\`
+	<input $value="{name}" $input="\${
+		(d, e, input) => d.name = input.value
+	}">
+	<p>Hello {name}</p>
+\`;
+Matsui.addTo(div, {name: "you"}, template);
+`,
 					vars: {
 						div: 'div'
 					}
 				});
 			</script>
 			
-			<nav class="auto"></nav>
+			<h3>Referencing a nested template</h3>
+			<script>
+				matsuiExample({
+					html: `
+<div>
+	<template name="uppercase">
+		\${data => data.toUpperCase()}
+	</template>
 
-			<h2>Overview</h2>
+	<input $value="{name}" $input="\${
+		(d, e, input) => d.name = input.value
+	}">
+	
+	<p>Hello $uppercase{name}</p>
+</div>`,
+					js: `Matsui.replace(div, {name: "you"});`,
+					vars: {
+						div: 'div'
+					}
+				});
+			</script>
+			
+			<h2>Design overview</h2>
+
+			<p>A <dfn>template</dfn> is any function which returns an object with:</p>
+			<dl class="compact">
+				<dt><code>node:</code></dt>
+				<dd>a DOM node</dd>
+				<dt><code>updates:</code></dt>
+				<dd>an array of update functions taking a JSON-like <code>data</code> argument</dd>
+			</dl>
+			<p>These functions accept a single argument, which is an "inner template" you can (but don't have to) use for nested data.</p>
+			<figure class="small"><pre><code>
+			// Implementation of the built-in "json" template
+			let jsonTemplate = innerTemplate => {
+				let node = document.createTextNode("");
+				return {
+					node: node,
+					updates: [data => {
+						node.nodeValue = JSON.stringify(data);
+					}]
+				};
+			};
+			</code></pre></figure>
+			<p>However, you'll mostly create templates using an HTML syntax (from a <code>&lt;template&gt;</code> or any other DOM node, or from a tagged string template).</p>
+			
+			<h3>HTML template syntax</h3>
+			<dl>
+				<dt><code>{key}</code></dt>
+				<dd>Simple property access, equivalent to <code>${data => data[key]}</code></dd>
+				
+				<dt><code>${data => ...}</code></dt>
+				<dd>A function which returns the actual data to render</dd>
+				
+				<dt>Named templates</dt>
+				<dt><code>$named{key}</code></dt>
+				<dt><code>$named${data => ...}</code></dt>
+				<dd>Uses a template (registered with the given name) to render the sub-data.  Can be a sequence, like <code>$list$named{foo}</code> where the inner template becomes the "default" for the outer one.</dd>
+
+				<dt>Element attributes</dt>
+				<dt><code>$custom="..."</code></dt>
+				<dt><code>$event="..."</code></dt>
+				<dt><code>$property="..."</code></dt>
+				<dt><code>$attribute="..."</code></dt>
+				<dd class="compact">
+					<p>The value is interpreted with <code>{...}</code> and <code>${...}</code> as above, and then used with one of the following:</p>
+					<ul>
+						<li>a custom handler (if one is registered in <code>templateSet.attributes</code>)</li>
+						<li>an event handler (if the element has a matching event name)</li>
+						<li>set property on the element (if the element already has that property defined, e.g. <code>input.value</code>)</li>
+						<li>sets an attribute on the element</li>
+					</ul>
+				</dd>
+
+				<dt>Named nested templates</dt>
+				<dt><code>&lt;template name="..."></code></dt>
+				<dd>These are used to resolve any templates (named in a <code>$named{value}</code> syntax), and are scoped to the element that contains them.</dd>
+
+				<dt>Anonymous nested templates</dt>
+				<dt><code>&lt;template></code></dt>
+				<dd>These are rendered immediately, using the same data as their surrounding context.  These are useful if (1) you can't have a text node at that position in the document (e.g. inside a <code>&lt;table></code>) or you want to use a <code>@attr</code> transform on the template.</dd>
+			</dl>
+
+			<h3>Template sets</h3>
+			<p>You parse HTML-based templates through a <dfn>template set</dfn> (like <code>Matsui.global</code>).</p>
+			<p>Template mostly help supply the inner-template for rendering - either from their map of named templates (such as the pre-supplied templates <code>"text"</code>, <code>"json"</code> and <code>"list"</code>), or the "dynamic" template which switches depending on the data itself.</p>
+			<p>You can use a template set in the following ways:</p>
+			<dl>
+				<dt><code>.extend()</code></dt>
+				<dd>Returns a new template set which inherits the named templates, attributes and transforms.</dd>
+
+				<dt><code>.fromElement(node)</code></dt>
+				<dt><code>.fromElement('#query')</code></dt>
+				<dt><code>.fromTag`template`</code></dt>
+				<dd>Creates a new template from the element (which doesn't <em>have</em> to be a <code>&lt;template></code>) or <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals">template literal</a>.</dd>
+
+				<dt><code>.add(name, template, ?filter)</code></dt>
+				<dt><code>.addElement(name, node, ?filter)</code></dt>
+				<dt><code>.addElement(name, '#query', ?filter)</code></dt>
+				<dt><code>.addTag(name, ?filter)`template`</code></dt>
+				<dd>Registers a template with the given name.  If <code>filter</code> is provided, then it becomes the new highest-priority option for the <code>.dynamic</code> template.</dd>
+
+				<dt><code>.getNamed("...")</code></dt>
+				<dd>Returns the template registered with this name, or <code>.dynamic</code> if none is found.</dd>
+
+				<dt><code>.getForData(data)</code></dt>
+				<dd>Returns the most recently-added template with an associated a filter-function which returns <code>true</code> for the given data.</dd>
+
+				<dt><code>.dynamic</code></dt>
+				<dd>Starting with the most recently-added template (with a <code>filter</code> argument), find one where the filter returns <code>true</code> for the data and render using that.  This choice is <em>sticky</em>, meaning that it doesn't keep re-checking higher priority templates, it just uses that template unless the filter starts returning <code>false</code>.</dd>
+
+				<dt>.attributes[name] = ...</dt>
+				<dd>
+					Functions to use for custom <code>$...</code> attributes.
+				</dd>
+
+				<dt>.transforms[name] = ...</dt>
+				<dd>
+					Functions to use for <code>@...</code> transforms.
+				</dd>
+			</dl>
+			
+			<h3>Custom attributes</h3>
+			<p>The values in <code>templateSet.attributes</code> are functions, which will be given two arguments:</p>
+			<ul>
+				<li><code>node</code>: the element containing the attribute</li>
+				<li><code>valueFn</code>: a function to call which gets the latest value</li>
+			</ul>
+			<p>The <code>valueFn</code> will use the latest-rendered data (or <code>null</code> if no render has happened yet to fill out the attribute value.  If the attribute body is just a single <code>{...}</code> or <code>${...}</code> expression, then the returned value is whatever type that returns.  Otherwise, all the values are concatenated into a string.</p>
+			<p>The custom-attribute function <em>may</em> return an update function with a single <code>data</code> argument.  Any additional arguments passed to <code>valueFn</code> will be handed to any functions from its body, e.g.:</p>
+			<script>
+				matsuiExample({
+					html: `
+<div>
+	<p>Pressed: {when}</p>
+	<div $now="\${(data, now) => data.when = now}">
+		<strong style="user-select: none">
+			press me
+		</strong>
+	</div>
+</div>`,
+					js: `
+let custom = Matsui.global.extend();
+
+custom.attributes.now = (node, valueFn) => {
+	node.style.cursor = "pointer";
+	
+	node.addEventListener('click', e => {
+		e.preventDefault();
+		e.stopPropagation();
+		let now = (new Date).toISOString();
+		// Hands an extra argument to valueFn
+		valueFn(now);
+	});
+};
+
+Matsui.replace(div, {when: "not yet"}, custom);
+`,
+					vars: {
+						div: 'div'
+					}
+				});
+			</script>
+			
+			<h3>Transforms</h3>
+			<p>Transforms map from one template to another.  When a template has an attribute starting with <code>@...</code>, the corresponding entry from <code>templateSet.transforms</code> is used to transform the (fully-parsed) template.</p>
+			<p>There are some built-in ones (<code class="language-none">@data</code> and <code class="language-none">@foreach</code> and <code class="language-none">@if</code>), but you can add your own.
+			<script>
+				matsuiExample({
+					html: `
+<div>
+	<button $click="\${d => d.value = !d.value}">
+		toggle
+	</button>
+	<template @if="{value}">
+		<template @repeat="5">
+			Hooray!<br>
+		</template>
+	</template>
+</div>`,
+					js: `
+let custom = Matsui.global.extend();
+
+function repeat(template, valueFn, templateSet) {
+	// evaluates immediately, as if data is null
+	let repeatCount = parseInt(valueFn());
+	
+	return innerTemplate => {
+	};
+};
+custom.transforms.repeat = repeat;
+
+Matsui.replace(div, {value: false}, custom);
+`,
+					vars: {
+						div: 'div'
+					}
+				});
+			</script>
+			<p>This transform is run once, before any rendering happens.  If you call <code>valueFn</code> straight away, it will evaluate as if the data is <code>null</code>.  This is still useful for cases like <code>@repeat="5"></code></p>
+			
+			<h2>Smart updates</h2>
+			<p>Filling out a template is simple enough: stick the <code>.node</code> somewhere, and call all the update functions (with a single <code>data</code> argument) as many times as you like.</p>
+			<p>The challenge is how to react to changes in the data, and to only update the parts of the page that need it.  This is done with three ideas working together:</p>
+			<dl>
+				<dt>Access-tracking</dt>
+				<dd>Using <code>Proxy</code> objects, we can track which parts of the data a given update function has used.</dd>
+
+				<dt>Change-tracked objects</dt>
+				<dd>We can wrap data objects in a <code>Proxy</code> such that changing anything produces a <a href="https://datatracker.ietf.org/doc/html/rfc7396">merge-patch object</a> representing that change.</dd>
+
+				<dt>Hidden merge objects</dt>
+				<dd>We can associate a hidden merge-object with data objects.  This follows property access, so that if <code>data</code> has a merge-object attached (to represent a change which just happened), <code>data[key]</code> will have a subset of that merge-object attached, with just the changes</dd>
+			</dl>
+			<details>
+				<summary>diagram of hidden-merge objects</summary>
+				<figure><object data="diagrams/hidden-merge.svg"><img src="diagrams/hidden-merge.svg"></object></figure>
+			</details>
+			
+			<h3><code>Matsui.combineUpdates([...])</code></h3>
+			<p>These come together in the <code>Matsui.combineUpdates()</code> method, which returns a single update function.  This update function checks for a hidden merge object, and (if there is one) only re-runs the updates which accessed parts of the data which have now changed.</p>
+
+			<h3>Wrapped data</h3>
+			<p>For simplicity, we can wrap any data value using <code>Matsui.wrap(value)</code>.  This returns an object with the following methods:</p>
+			<dl>
+				<dt><code>.data()</code></dt>
+				<dd>Returns the changed-tracked version of the data.  Note that this change-tracking only works on objects (plain values like strings are just plain values), but you can still make changes through the <code>.merge()</code>/<code>.setData()</code> methods below.</dd>
+			
+				<dt><code>.track(mergeObj => ...)</code></dt>
+				<dt><code>.track(mergeObj => ..., true)</code></dt>
+				<dd>Adds a listener which is called when the data is changed.  The optional second argument flags whether it's also triggered when you call <code>.merge()</code>/<code>.setData()</code>.
+
+				<dt><code>.merge(mergeObj)</code></dt>
+				<dd>Applies the given merge object to the data (and update any renders)</dd>
+				
+				<dt><code>.setData(newValue)</code></dt>
+				<dd>Replaces the wrapped value (and update any renders)</dd>
+
+				<dt><code>.addTo(element, template)</code></dt>
+				<dt><code>.addTo(element, template, templateSet)</code></dt>
+				<dd>Renders the wrapped data, and appends it to the specified element.  The <code>element</code> could be a DOM node or a query string (e.g. <code>'#my-element'</code>, and the template could be an actual template, or an element/query-string pointing to an element to use as a template.</dd>
+
+				<dt><code>.replace(element)</code></dt>
+				<dt><code>.replace(element, template)</code></dt>
+				<dt><code>.replace(element, templateSet)</code></dt>
+				<dt><code>.replace(element, template, templateSet)</code></dt>
+				<dd>This replaces the specified element with the rendered data.  If <code>template</code> is omitted, then the template is made from <code>element</code> and the rendering is done in-place in the document.</dd>
+			</dl>
+			<p>This wrapping function takes an optional second argument: <code>Matsui.wrap(value, isSync)</code> which determines whether any changes made to the data (through <code>.data()</code> or by the templates themselves) are updated immediately, or collected and updated asynchronously.  The default behaviour is asynchronous, so that multiple changes produce a single merge/render update.</p>
+			
+			<h2>Sync</h2>
+			<p>The wrapped data (from <code>Matsui.wrap(...)</code>) also has a <code>.sync()</code> method:</p>
+			<todo>sync</todo>
+			
+<!--
 
 			<h3>Principles</h3>
-			<ul>
-				<li>concise implementation
-				<li>only updates the page where needed
-				<li>plain JavaScript library (no compilation step)
-				<li>CSP (Content Security Policy) support
-			</ul>
 			
 			<h3>Data & Templates</h3>
 			<p>The data is JSON-like, except <code>null</code> is equivalent to a value/property not existing.  You interact with it by directly changing values (rather than calling methods).</p>
