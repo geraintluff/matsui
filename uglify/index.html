@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Uglify</title>
+		<meta charset="utf8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<style>
+			body {
+				margin: 0;
+				padding: 0;
+				display: flex;
+				height: 100vh;
+				width: 100vw;
+				flex-direction: row;
+				font-family: "Segoe UI", Frutiger, "Frutiger Linotype", "Dejavu Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+				font-size: 12pt;
+				font-size: calc(max(8pt, min(12pt, 3vw)));
+			}
+			body {
+				flex-wrap: wrap;
+			}
+			#input, #results {
+				flex-grow: 1;
+				flex-basis: 300pt;
+			}
+			#results {
+				display: flex;
+				flex-direction: column;
+			}
+			#buttons {
+				display: flex;
+				flex-direction: row;
+			}
+			#go-button {
+				background: #333;
+				color: #FFF;
+				border: 2px solid #000;
+				font: inherit;
+				padding: 0.5em;
+				flex-grow: 1;
+			}
+			#go-button {
+				background: #333;
+				color: #FFF;
+				border: 2px solid #000;
+				font: inherit;
+				padding: 0.5em;
+				flex-grow: 1;
+			}
+			#output {
+				flex-grow: 1;
+				background: #EEE;
+			}
+			textarea {
+				font-size: 0.85em;
+				font-family: "Lucida Console", "Lucida Sans Typewriter", monaco, "Bitstream Vera Sans Mono", monospace;
+				padding: 0.5em;
+			}
+		</style>
+	</head>
+	<body>
+		<textarea id="input" placeholder="JS code" autofocus
+			$input-keypath="input.code"
+			$shift-press="${run}"
+			$drop-file="${(d, files) => {
+				Promise.all(files.map(f =>
+					f.text().then(text => ({
+						name: f.name,
+						text: text
+					}))
+				)).then(list => {
+					d.input.code = list.map(entry => `//---- ${entry.name} ----\n\n${entry.text}`).join('\n\n');
+				});
+			}}" data-accept="text/*"></textarea>
+		
+		<div id="results">
+			<div id="buttons">
+				<button id="go-button" $click="${run}">minify</button>
+			</div>
+			<textarea id="output" placeholder="minified" readonly
+				$value="${d => d.output.error || d.output.code}"></textarea>
+		</div>
+
+		<!-- npx uglify-js --self --compress --mangle --output uglify.min.js -->
+		<script src="uglify.min.js"></script>
+		<script src="../matsui.min.js"></script>
+		<script src="matsui-extras.js"></script>
+		<script src="matsui-sync.js"></script>
+		<script>
+			function run(data) {
+				let $ = document.querySelector.bind(document);
+				let output = $('#output');
+				let js = $('#input').value;
+
+				let options = JSON.parse(JSON.stringify(data.options));
+				if (options.mangle && options.mangle.properties && options.mangle.properties.regex) {
+					options.mangle.properties.regex = new RegExp(options.mangle.properties.regex);
+				}
+				data.output = UglifyJS.minify(data.input.code, options);
+			}
+		
+			function defaultOptions() {
+				return {
+					compress: {
+						passes: 2
+					},
+					mangle: {
+						properties: {
+							regex: "^(m_|#)"
+						}
+					},
+					output: {
+						ascii_only: true
+					}
+				};
+			}
+			let wrapped = Matsui.replace(document.body, {
+				input: {code: 'console.log("Hello, world!");'},
+				output: {code: ''},
+				options: defaultOptions()
+			});
+			Matsui.sync.hash(wrapped, {
+				get query() {
+					return Matsui.merge.make(defaultOptions(), wrapped.data().options)
+				},
+				set query(query) {
+					wrapped.data().options = Matsui.merge.apply(defaultOptions(), query);
+				}
+			});
+			Matsui.sync.localStorage(wrapped, {
+				get uglifyInput() {
+					return wrapped.data().input;
+				},
+				set uglifyInput(input) {
+					if (input) wrapped.data().input = input;
+				}
+			})
+		</script>
+	</body>
+</html>
