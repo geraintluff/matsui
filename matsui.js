@@ -233,7 +233,7 @@ let Matsui = (() => {
 			function didAccess(trackerObj, mergeValue) {
 				if (mergeValue == noChangeSymbol) return false;
 				if (trackerObj[accessedKey]) return true;
-				if (!isObject(mergeValue)) return true;
+				if (!isObject(mergeValue) || Array.isArray(mergeValue)) return true;
 				return Object.keys(mergeValue).some(key => {
 					return trackerObj[key]
 						&& didAccess(trackerObj[key], mergeValue[key]);

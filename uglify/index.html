@@ -20,9 +20,16 @@
 			body {
 				flex-wrap: wrap;
 			}
-			#input, #results {
+			#input-column, #results {
 				flex-grow: 1;
 				flex-basis: 300pt;
+			}
+			#input-column {
+				display: flex;
+				justify-content: stretch;
+			}
+			#input {
+				flex-grow: 1;
 			}
 			#results {
 				display: flex;
@@ -66,6 +73,45 @@
 				font-size: 0.85em;
 				font-family: "Lucida Console", "Lucida Sans Typewriter", monaco, "Bitstream Vera Sans Mono", monospace;
 				padding: 0.5em;
+				resize: none;
+				border: none;
+				border-radius: 0;
+			}
+			
+			#file-column {
+				display: flex;
+				flex-direction: column;
+				justify-content: space-between;
+				background: #DDD;
+				border-right: 1px solid #888;
+			}
+			#file-list {
+				display: flex;
+				flex-direction: column;
+			}
+			#file-column button {
+				position: relative;
+				background: #EEE;
+				color: #000;
+				border: 1px solid #8888;
+				border-right: none;
+				line-height: 2;
+				flex-grow: 0;
+			}
+			
+			.tab-left {
+				position: relative;
+				margin: 0.3em 0 0.3em 0.3em;
+				padding: 0 0.3em;
+				border-radius: 0.5em 0 0 0.5em;
+				box-shadow: -2px 0px 1px #0001 inset;
+				left: 0;
+				transition: left 0.05s, padding 0.05s;
+			}
+			#file-column .tab-left.selected {
+				box-shadow: none;
+				background: #FFF;
+				border-color: #000;
 			}
 			
 			.interaction-drop {
@@ -87,25 +133,54 @@
 		</style>
 	</head>
 	<body>
-		<textarea id="input" placeholder="JS code" autofocus
-			$input-keypath="input.code"
-			$input-done="${run}"
-			$drop-file="${(d, files) => {
+
+		<script>
+			function dropFiles(data, files) {
 				Promise.all(files.map(f =>
 					f.text().then(text => ({
 						name: f.name,
-						text: text
+						code: text
 					}))
 				)).then(list => {
-					d.input.code = list.map(entry => `//---- ${entry.name} ----\n\n${entry.text}`).join('\n\n');
+					if (!Array.isArray(data.input)) data.input = [];
+					data.input = data.input.concat(list);
 				});
-			}}" data-accept="text/*"></textarea>
+			}
+		</script>
+		<div id="input-column" $drop-file="${dropFiles}">
+			<template @if="${d => Array.isArray(d.input)}">
+				<div id="file-column">
+					<div id="file-list">
+						<template @foreach="{input}">
+							<button class="tab-left"
+								$click="${(d, e, node) => {
+									document.querySelector('#input').value = d.code;
+									node.parentNode.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
+									node.classList.add('selected');
+								}}"
+								>${d => d.name}</button>
+						</template>
+					</div>
+					<button id="combine-files-button" $click="${d => d.input = d.input
+						.map(file => `//---- ${file.name} ----\n\n${file.code}`)
+						.join('\n\n')
+					}">clear</button>
+				</div>
+				<textarea id="input" readonly></textarea>
+			</template>
+			<template @if="${d => !Array.isArray(d.input)}">
+				<textarea id="input" placeholder="JS code" autofocus
+					$input-keypath="input"
+					$input-done="${run}"></textarea>
+			</template>
+		</div>
 		
 		<div id="results">
 			<div id="controls">
 				<button id="go-button" $click="${run}">minify</button>
 				<button id="options-button" $click="${d => d.optionsDialog = true}">options</button>
-				<div id="result-size">${d => d.input.code.length} → ${d => (d.output.error ? 'Error' : d.output.code.length + ' bytes')}</div>
+				<div id="result-size">${d =>
+					(Array.isArray(d.input) ? d.input.map(f => f.code).join('') : d.input).length} → ${d => (d.output.error ? 'Error' : d.output.code.length + ' bytes')}</div>
 				<label>
 					<input type="checkbox" $input-keypath="live">
 					live
@@ -136,7 +211,8 @@
 				if (options.mangle && options.mangle.properties && options.mangle.properties.regex) {
 					options.mangle.properties.regex = new RegExp(options.mangle.properties.regex);
 				}
-				let outputObj = UglifyJS.minify(data.input.code, options);
+				let inputCode = Array.isArray(data.input) ? data.input.map(f => f.code).join('\n;') : data.input;
+				let outputObj = UglifyJS.minify(inputCode, options);
 				data.output = outputObj;
 			}
 		
@@ -155,18 +231,32 @@
 					}
 				};
 			}
-			let optionsSchema = {
-				title: "UglifyJS options",
-				$schema: true, // not kosher, but we just test for truthiness anyway
-			};
 			let wrapped = Matsui.replace(document.body, {
-				input: {code: 'console.log("Hello, world!");'},
+				input: 'console.log("Hello, world!");',
 				live: false,
 				output: {code: ''},
 				options: defaultOptions()
 			});
+			
+			// Live updates, if enabled
+			let notBefore = 0;
+			let liveTimeout = null;
 			wrapped.addUpdates(data => {
-				if (data.live) run(data);
+				let go = () => {
+					let start = Date.now();
+					run(data);
+					let duration = Date.now() - start;
+					notBefore = Date.now() + duration; // only half the time
+				};
+				if (data.live) {
+					if (Date.now() > notBefore) {
+						clearTimeout(liveTimeout);
+						go();
+					} else {
+						clearTimeout(liveTimeout);
+						setTimeout(go, notBefore - Date.now() + 10);
+					}
+				}
 			});
 			
 			wrapped.syncHash(data => ({
@@ -189,7 +279,7 @@
 				},
 				set uglifyInput(input) {
 					if (input) data.input = input;
-				}
+				},
 			}));
 		</script>
 	</body>

@@ -1,5 +1,7 @@
 (attributes => {
 	let doubleClickMs = 300;
+
+	/*
 	function scaleDistance(d, e) {
 		if (e.metaKey || e.shiftKey) d *= 0.2;
 		return d;
@@ -15,13 +17,16 @@
 			}
 		});
 	}
+	*/
 
 	attributes.modalClose = (node, handler) => {
 		node.addEventListener('close', e => handler(e, node));
 		node.addEventListener('cancel', e => handler(e, node));
-		node.addEventListener('keydown', e => {
-			if (e.key == 'Esc') handler(e, node);
-		});
+		if (node.tagName !== 'DIALOG') {
+			node.addEventListener('keydown', e => {
+				if (e.key == 'Esc') handler(e, node);
+			});
+		}
 	};
 
 	attributes.modal = (node, handler) => {
@@ -136,8 +141,6 @@
 	};
 
 	attributes.dropFile = (node, valueFn) => {
-		let accept = node.dataset.accept || '*/*';
-		
 		function getFiles(e) {
 			let files = [];
 			if (e.dataTransfer.items) {
@@ -159,7 +162,8 @@
 			}
 		});
 		node.addEventListener('dragleave', e => {
-			if (getFiles(e)) {
+			console.log(e.target);
+			if (e.target === node && getFiles(e)) {
 				node.classList.remove("interaction-drop");
 			}
 		});
