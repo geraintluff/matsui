@@ -15,6 +15,7 @@
 				font-family: "Segoe UI", Frutiger, "Frutiger Linotype", "Dejavu Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 				font-size: 12pt;
 				font-size: calc(max(8pt, min(12pt, 3vw)));
+				tab-size: 4;
 			}
 			body {
 				flex-wrap: wrap;
@@ -27,25 +28,35 @@
 				display: flex;
 				flex-direction: column;
 			}
-			#buttons {
+			#controls {
 				display: flex;
 				flex-direction: row;
+				flex-wrap: wrap;
+				flex-grow: 0;
 			}
-			#go-button {
+			#controls > * {
+				flex-grow: 1;
+				width: 5em;
+				line-height: 2;
+				text-align: center;
+			}
+			button {
 				background: #333;
 				color: #FFF;
 				border: 2px solid #000;
 				font: inherit;
-				padding: 0.5em;
+				padding: 0;
 				flex-grow: 1;
+				cursor: pointer;
 			}
-			#go-button {
-				background: #333;
-				color: #FFF;
-				border: 2px solid #000;
-				font: inherit;
-				padding: 0.5em;
-				flex-grow: 1;
+			#options-button {
+				background: #FFF;
+				color: #000;
+				border-color: #DDD;
+			}
+			#result-size {
+				padding: 0em 0.5em;
+				white-space: nowrap;
 			}
 			#output {
 				flex-grow: 1;
@@ -56,12 +67,29 @@
 				font-family: "Lucida Console", "Lucida Sans Typewriter", monaco, "Bitstream Vera Sans Mono", monospace;
 				padding: 0.5em;
 			}
+			
+			.interaction-drop {
+				outline: 0.5em dotted currentcolor;
+				outline-offset: -0.65em;
+				opacity: 0.65;
+			}
+			
+			dialog::backdrop {
+				background-color: #8889;
+				backdrop-filter: blur(1px) grayscale(50%);
+				cursor: pointer; /* click to exit */
+			}
+			
+			dialog {
+				border-radius: 5px;
+			}
+
 		</style>
 	</head>
 	<body>
 		<textarea id="input" placeholder="JS code" autofocus
 			$input-keypath="input.code"
-			$shift-press="${run}"
+			$input-done="${run}"
 			$drop-file="${(d, files) => {
 				Promise.all(files.map(f =>
 					f.text().then(text => ({
@@ -74,29 +102,42 @@
 			}}" data-accept="text/*"></textarea>
 		
 		<div id="results">
-			<div id="buttons">
+			<div id="controls">
 				<button id="go-button" $click="${run}">minify</button>
+				<button id="options-button" $click="${d => d.optionsDialog = true}">options</button>
+				<div id="result-size">${d => d.input.code.length} → ${d => (d.output.error ? 'Error' : d.output.code.length + ' bytes')}</div>
+				<label>
+					<input type="checkbox" $input-keypath="live">
+					live
+				</label>
 			</div>
 			<textarea id="output" placeholder="minified" readonly
 				$value="${d => d.output.error || d.output.code}"></textarea>
 		</div>
+		
+		<template @if="{optionsDialog}">
+			<dialog $modal="1" $close="${d => d.optionsDialog = false}">
+				<div>Hello!
+				</div>
+			</dialog>
+		</template>
 
 		<!-- npx uglify-js --self --compress --mangle --output uglify.min.js -->
 		<script src="uglify.min.js"></script>
-		<script src="../matsui.min.js"></script>
-		<script src="matsui-extras.js"></script>
-		<script src="matsui-sync.js"></script>
+		<script src="../matsui.js"></script>
+		<script src="../extra/sync.js"></script>
+		<script src="../extra/log-dom.js"></script>
+		<script src="../extra/interaction.js"></script>
 		<script>
 			function run(data) {
 				let $ = document.querySelector.bind(document);
-				let output = $('#output');
-				let js = $('#input').value;
 
 				let options = JSON.parse(JSON.stringify(data.options));
 				if (options.mangle && options.mangle.properties && options.mangle.properties.regex) {
 					options.mangle.properties.regex = new RegExp(options.mangle.properties.regex);
 				}
-				data.output = UglifyJS.minify(data.input.code, options);
+				let outputObj = UglifyJS.minify(data.input.code, options);
+				data.output = outputObj;
 			}
 		
 			function defaultOptions() {
@@ -114,27 +155,42 @@
 					}
 				};
 			}
+			let optionsSchema = {
+				title: "UglifyJS options",
+				$schema: true, // not kosher, but we just test for truthiness anyway
+			};
 			let wrapped = Matsui.replace(document.body, {
 				input: {code: 'console.log("Hello, world!");'},
+				live: false,
 				output: {code: ''},
 				options: defaultOptions()
 			});
-			Matsui.sync.hash(wrapped, {
+			wrapped.addUpdates(data => {
+				if (data.live) run(data);
+			});
+			
+			wrapped.syncHash(data => ({
+				get path() {
+					return data.live ? 'live' : '';
+				},
+				set path(path) {
+					data.live = (path == 'live');
+				},
 				get query() {
-					return Matsui.merge.make(defaultOptions(), wrapped.data().options)
+					return Matsui.merge.make(defaultOptions(), data.options)
 				},
 				set query(query) {
-					wrapped.data().options = Matsui.merge.apply(defaultOptions(), query);
+					data.options = Matsui.merge.apply(defaultOptions(), query);
 				}
-			});
-			Matsui.sync.localStorage(wrapped, {
+			}));
+			wrapped.syncLocalStorage(data => ({
 				get uglifyInput() {
-					return wrapped.data().input;
+					return data.input;
 				},
 				set uglifyInput(input) {
-					if (input) wrapped.data().input = input;
+					if (input) data.input = input;
 				}
-			})
+			}));
 		</script>
 	</body>
 </html>

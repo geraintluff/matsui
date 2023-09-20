@@ -103,8 +103,7 @@
 		</script>
 	</head>
 	<body>
-		<!-- log DOM changes -->
-		<script>(e=>new MutationObserver((t=>t.forEach((t=>"characterData"==t.type?e("text:",t.target.nodeValue):"attribute"==t.type?e("attr:",t.attributeName,t.target.getAttribute(t.attributeName)):t.addedNodes.forEach((t=>e("add:",3==t.nodeType?JSON.stringify(t.nodeValue):t)))&&t.removedNodes.forEach((t=>e("remove:",t))))))))(console.log).observe(document.body,{subtree:!0,childList:!0,characterData:!0})</script>
+		<script src="extra/log-dom.js"></script>
 		<header class="blog"></header>
 		<article class="main full language-javascript">
 			<header>

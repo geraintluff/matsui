@@ -65,8 +65,9 @@ let Matsui = (() => {
 				let notifyPendingMerge = () => {
 					clearTimeout(pendingMergeTimeout);
 					if (pendingMerge != null) {
-						actualUpdateFn(pendingMerge);
-						pendingMerge = null;
+						let merge = pendingMerge;
+						pendingMerge = null; // clear it first
+						actualUpdateFn(merge);
 					}
 				}
 				updateFn = mergeObj => {
@@ -85,7 +86,10 @@ let Matsui = (() => {
 				get(obj, prop) {
 					let value = obj[prop];
 					if (prop == rawKey) return obj;
+					// TODO: if it's a function without a .prototype (meaning it might be bound - see below) is there a way to let it run, but check for changes?  Or return a proxy function to do that when it's called (which could be later)?
+					// That could also check for `this` being the proxy, and (before triggering) call the actual function on `obj` instead, which would handle methods which complain when called on the proxy (like Date::toString())
 					if (!isObject(value)) return value;
+
 					return merge.tracked(
 						value,
 						mergeObj => updateFn({
@@ -175,6 +179,9 @@ let Matsui = (() => {
 					} else if (isArray && prop === 'length') {
 						trackerObj[accessedKey] = accessedKey;
 						return value;
+					} else if (typeof value === 'function' && !value.prototype) {
+						trackerObj[accessedKey] = accessedKey; // arrow functions, bound functions, and some native methods - more likely to not go through 'this' if they access stuff
+						// TODO: now we've done that, should we return a bound version?
 					}
 					
 					if (!(prop in trackerObj)) trackerObj[prop] = {};
@@ -201,6 +208,7 @@ let Matsui = (() => {
 			// Already a list with just a single combined function
 			return updateFunctions[0];
 		}
+		Object.freeze(updateFunctions);
 		let firstRun = true;
 		
 		let updateAccess = [];
@@ -225,7 +233,7 @@ let Matsui = (() => {
 			function didAccess(trackerObj, mergeValue) {
 				if (mergeValue == noChangeSymbol) return false;
 				if (trackerObj[accessedKey]) return true;
-				if (!isObject(mergeValue)) return false;
+				if (!isObject(mergeValue)) return true;
 				return Object.keys(mergeValue).some(key => {
 					return trackerObj[key]
 						&& didAccess(trackerObj[key], mergeValue[key]);
@@ -635,7 +643,8 @@ let Matsui = (() => {
 						}
 					}
 				}
-				return result.join("");
+				result = result.join("");
+				return (result != text) ? result : null;
 			};
 			
 			function walk(node, templateSet) {
@@ -648,7 +657,8 @@ let Matsui = (() => {
 							let name = child.id || child.getAttribute('name');
 							for (let attr of child.attributes) {
 								if (attr.name[0] === '@') {
-									attr.value = replaceString(attr.value, templateSet);
+									let newValue = replaceString(attr.value, templateSet);
+									if (newValue !== null) attr.value = newValue;
 								}
 							}
 							if (name) {
@@ -666,11 +676,13 @@ let Matsui = (() => {
 				if (node.nodeType === 1) { // element
 					for (let attr of node.attributes) {
 						if (attr.name[0] == '$') {
-							attr.value = replaceString(attr.value, templateSet);
+							let newValue = replaceString(attr.value, templateSet);
+							if (newValue !== null) attr.value = newValue;
 						}
 					}
 				} else if (node.nodeType === 3) { // text
-					node.nodeValue = replaceString(node.nodeValue, templateSet);
+					let newValue = replaceString(node.nodeValue, templateSet);
+					if (newValue !== null) node.nodeValue = newValue;
 				}
 				if (node.childNodes) {
 					node.childNodes.forEach(child => walk(child, templateSet));
@@ -846,7 +858,7 @@ let Matsui = (() => {
 		};
 	};
 	
-	function TrackedRender(data, synchronous) {
+	function Wrapped(data, synchronous) {
 		let mergeTracked;
 		let updateFunctions = [];
 		let sendUpdate = (mergeObj, fromExternalMethod) => {
@@ -855,12 +867,20 @@ let Matsui = (() => {
 			});
 		};
 		// Register for merge updates
-		this.track = (fn, notifyExternal) => {
+		this.trackMerges = (fn, notifyExternal) => {
 			updateFunctions.push({
 				m_fn: fn,
 				m_notifyExternal: !!notifyExternal
 			});
 			return this;
+		};
+		this.addUpdates = (updates, notifyExternal) => {
+			let combined = combineUpdates([].concat(updates));
+			this.trackMerges(mergeObj => {
+				let withMerge = Matsui.merge.addHidden(mergeTracked, mergeObj);
+				combined(withMerge);
+			}, notifyExternal);
+			combined(mergeTracked);
 		};
 
 		let setData = newData => {
@@ -902,15 +922,7 @@ let Matsui = (() => {
 			if (!template) template = templateSet.fromElement(host);
 
 			let bindingInfo = template(templateSet.dynamic);
-			let updateDisplay = combineUpdates(bindingInfo.updates);
-
-			// Update the display straight away
-			updateDisplay(mergeTracked, data);
-			// and update on future data as well
-			this.track(mergeObj => {
-				let withMerge = merge.addHidden(mergeTracked, mergeObj);
-				updateDisplay(withMerge);
-			}, true);
+			this.addUpdates(bindingInfo.updates);
 			
 			let node = bindingInfo.node;
 			if (replace) {
@@ -935,10 +947,10 @@ let Matsui = (() => {
 		merge: merge,
 		access: access,
 		combineUpdates: combineUpdates,
-		sync: sync,
 
 		global: globalSet,
-		wrap: data => new TrackedRender(data),
+		Wrapped: Wrapped,
+		wrap: data => new Wrapped(data),
 		addTo: (element, data, template) => {
 			return api.wrap(data).addTo(element, template);
 		},

@@ -34,7 +34,7 @@ Test("combining updates", (api, pass, fail, assert) => {
 		data => {
 			let baz = api.access.pierce(data);
 		},
-		// only on the first run
+		// only on the first run, or if the top-level object is replaced (since that could change the boolean status, and we have no way of telling if that's checked)
 		data => {
 			let unrelated = {fiveHundred: 500};
 			let pierced = api.access.pierce(unrelated);
@@ -98,17 +98,17 @@ Test("combining updates", (api, pass, fail, assert) => {
 		});
 		assert.deepEqual(callCount(), [0, 1, 0, 1, 1, 0, 1, 0]);
 
-		// accessing root, baz (by claiming to replace it)
+		// accessing root, baz (by claiming to replace it) and baz[0] (because baz was replaced)
 		updateWithMerge({
 			baz: "BAZ"
 		});
-		assert.deepEqual(callCount(), [0, 1, 0, 1, 1, 0, 1, 0]);
+		assert.deepEqual(callCount(), [0, 1, 1, 1, 1, 0, 1, 0]);
 
-		// accessing root, baz (by claiming to delete it)
+		// accessing root, baz (by claiming to delete it) and baz[0] (because the baz was deleted)
 		updateWithMerge({
 			baz: null
 		});
-		assert.deepEqual(callCount(), [0, 1, 0, 1, 1, 0, 1, 0]);
+		assert.deepEqual(callCount(), [0, 1, 1, 1, 1, 0, 1, 0]);
 
 		// accessing root, and the non-existent property florp
 		updateWithMerge({
@@ -119,10 +119,10 @@ Test("combining updates", (api, pass, fail, assert) => {
 		// accessing just root, with no actual changes
 		updateWithMerge({});
 		assert.deepEqual(callCount(), [0, 1, 0, 0, 0, 0, 1, 0]);
-		updateWithMerge("mystery");
-		assert.deepEqual(callCount(), [0, 1, 0, 0, 0, 0, 1, 0]);
-		updateWithMerge(null);
-		assert.deepEqual(callCount(), [0, 1, 0, 0, 0, 0, 1, 0]);
+		updateWithMerge("mystery"); // claims to replace everything
+		assert.deepEqual(callCount(), [1, 1, 1, 1, 1, 1, 1, 1]);
+		updateWithMerge(null); // claims to delete everything
+		assert.deepEqual(callCount(), [1, 1, 1, 1, 1, 1, 1, 1]);
 	}
 	pass()
 });
@@ -150,5 +150,45 @@ Test("combining a combined update", (api, pass, fail, assert) => {
 	combined3();
 	assert(updateCount === 5); // calls things twice
 	
+	pass();
+});
+
+Test("deleting a sub-object", (api, pass, fail, assert) => {
+	let updateCount = 0;
+	let data = {
+		foo: {
+			bar: 5
+		}
+	};
+	let updates = [
+		data => (data.foo.bar, ++updateCount)
+	];
+	
+	let combined = api.combineUpdates(updates);
+	function callWithMerge(merge) {
+		let withMerge = Matsui.merge.addHidden(data, merge);
+		combined(withMerge);
+	}
+	
+	combined(data);
+	assert(updateCount === 1);
+
+	callWithMerge({foo:{bar:6}});
+	assert(updateCount === 2);
+
+	// Shouldn't matter that it didn't actually change, it's based on the merge
+	callWithMerge({foo:null});
+	assert(updateCount === 3);
+	
+	data.foo = null;
+	let didThrow = false;
+	try {
+		callWithMerge({foo:null});
+	} catch (e) {
+		didThrow = true;
+	}
+	assert(didThrow); // it called the update, and failed to access data.foo.bar
+	assert(updateCount === 3); // so didn't get to the following statement
+
 	pass();
 });
