@@ -15,7 +15,15 @@
 			}
 		});
 	}
-	
+
+	attributes.modalClose = (node, handler) => {
+		node.addEventListener('close', e => handler(e, node));
+		node.addEventListener('cancel', e => handler(e, node));
+		node.addEventListener('keydown', e => {
+			if (e.key == 'Esc') handler(e, node);
+		});
+	};
+
 	attributes.modal = (node, handler) => {
 		if (node.tagName !== 'DIALOG') throw Error('Only use $modal on <dialog>');
 		node.addEventListener('click', e => {
@@ -74,7 +82,7 @@
 	};
 	
 	// binds the input's value to some part of the data
-	attributes['input-keypath'] = (node, valueFn) => {
+	attributes.inputKeypath = (node, valueFn) => {
 		let setValue;
 		let isCheckbox = (node.type == 'checkbox');
 
@@ -109,7 +117,7 @@
 	};
 
 	// Enter in <input>, Shift/Meta+Enter in textarea
-	attributes['input-done'] = (node, valueFn) => {
+	attributes.inputDone = (node, valueFn) => {
 		let handler = e => {
 			e.preventDefault();
 			e.stopPropagation();
@@ -127,7 +135,7 @@
 		});
 	};
 
-	attributes['drop-file'] = (node, valueFn) => {
+	attributes.dropFile = (node, valueFn) => {
 		let accept = node.dataset.accept || '*/*';
 		
 		function getFiles(e) {

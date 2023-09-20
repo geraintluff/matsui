@@ -376,6 +376,9 @@ let Matsui = (() => {
 						let name = attr.name.substr(1);
 						let getValue = expandAttribute(attr.value);
 						node.removeAttribute(attr.name);
+						
+						// dash-separated to camelCase
+						name = name.toLowerCase().replace(/-+(.)/g, (_, c) => c.toUpperCase());
 
 						setup.push({
 							m_path: nodePath,
