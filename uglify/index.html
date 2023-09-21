@@ -8,66 +8,64 @@
 			body {
 				margin: 0;
 				padding: 0;
-				display: flex;
 				height: 100vh;
 				width: 100vw;
-				flex-direction: row;
 				font-family: "Segoe UI", Frutiger, "Frutiger Linotype", "Dejavu Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 				font-size: 12pt;
 				font-size: calc(max(8pt, min(12pt, 3vw)));
 				tab-size: 4;
-			}
-			body {
-				flex-wrap: wrap;
-			}
-			#input-column, #results {
-				flex-grow: 1;
-				flex-basis: 300pt;
-			}
-			#input-column {
-				display: flex;
-				justify-content: stretch;
-			}
-			#input {
-				flex-grow: 1;
-			}
-			#results {
-				display: flex;
-				flex-direction: column;
-			}
-			#controls {
-				display: flex;
-				flex-direction: row;
-				flex-wrap: wrap;
-				flex-grow: 0;
-			}
-			#controls > * {
-				flex-grow: 1;
-				width: 5em;
-				line-height: 2;
+				
 				text-align: center;
+				display: grid;
+				grid-template-areas:
+					"files input minify options result live"
+					"files input output output output output";
+				grid-template-columns: max-content 4fr 1fr 1fr 1fr 1fr;
+				grid-template-rows: 2em 1fr;
+			}
+			@media (max-width: 65rem) {
+				body {
+					grid-template-areas:
+						"files input minify options "
+						"files input result live"
+						"files input output output";
+					grid-template-columns: max-content 2fr 1fr 1fr;
+					grid-template-rows: 2em 2em 1fr;
+				}
+			}
+			@media (max-width: 50rem) {
+				body {
+					grid-template-areas:
+						"files input input input input"
+						"files minify options result live"
+						"files output output output output";
+					grid-template-columns: max-content 1fr 1fr 1fr 1fr;
+					grid-template-rows: 1fr 2em 1fr;
+				}
+			}
+			@media (max-width: 30rem) {
+				body {
+					grid-template-areas:
+						"files input input "
+						"files minify options"
+						"files result live"
+						"files output output";
+					grid-template-columns: max-content 1fr 1fr;
+					grid-template-rows: 1fr 2em 2em 1fr;
+				}
 			}
 			button {
 				background: #333;
 				color: #FFF;
 				border: 2px solid #000;
 				font: inherit;
+				text-align: center;
 				padding: 0;
-				flex-grow: 1;
+				line-height: 2;
 				cursor: pointer;
-			}
-			#options-button {
-				background: #FFF;
-				color: #000;
-				border-color: #DDD;
-			}
-			#result-size {
-				padding: 0em 0.5em;
-				white-space: nowrap;
-			}
-			#output {
-				flex-grow: 1;
-				background: #EEE;
+				display: flex;
+				align-items: center;
+				justify-content: center;
 			}
 			textarea {
 				font-size: 0.85em;
@@ -79,38 +77,73 @@
 			}
 			
 			#file-column {
+				grid-area: files;
+				background: #DDD;
+				border-right: 2px solid black;
 				display: flex;
 				flex-direction: column;
 				justify-content: space-between;
-				background: #DDD;
-				border-right: 1px solid #888;
 			}
 			#file-list {
 				display: flex;
 				flex-direction: column;
 			}
-			#file-column button {
-				position: relative;
-				background: #EEE;
+			#input {
+				grid-area: input;
+				border-right: 2px solid black;
+				margin: 0;
+			}
+			#minify-button {
+				grid-area: minify;
+			}
+			#options-button {
+				grid-area: options;
+				background: #FFF;
 				color: #000;
-				border: 1px solid #8888;
-				border-right: none;
-				line-height: 2;
-				flex-grow: 0;
+				border-color: #DDD;
+			}
+			#result-size {
+				grid-area: result;
+				padding: 0em 0.5em;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				/*white-space: nowrap;*/
+			}
+			#output {
+				grid-area: output;
+				flex-grow: 1;
+				background: #EEE;
+			}
+			#live {
+				grid-area: live;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+			}
+			#clear-files-button {
+				background: #800;
+				border-color: #400;
 			}
 			
 			.tab-left {
 				position: relative;
 				margin: 0.3em 0 0.3em 0.3em;
 				padding: 0 0.3em;
+				border: 2px solid black;
+				border-right: none;
 				border-radius: 0.5em 0 0 0.5em;
 				box-shadow: -2px 0px 1px #0001 inset;
 				left: 0;
 				transition: left 0.05s, padding 0.05s;
-			}
-			#file-column .tab-left.selected {
-				box-shadow: none;
+				
 				background: #FFF;
+				color: #000;
+			}
+			.tab-left.selected {
+				box-shadow: none;
+				background: #333;
+				color: #FFF;
 				border-color: #000;
 			}
 			
@@ -132,7 +165,7 @@
 
 		</style>
 	</head>
-	<body>
+	<body $drop-file="${dropFiles}">
 
 		<script>
 			function dropFiles(data, files) {
@@ -147,48 +180,42 @@
 				});
 			}
 		</script>
-		<div id="input-column" $drop-file="${dropFiles}">
-			<template @if="${d => Array.isArray(d.input)}">
-				<div id="file-column">
-					<div id="file-list">
-						<template @foreach="{input}">
-							<button class="tab-left"
-								$click="${(d, e, node) => {
-									document.querySelector('#input').value = d.code;
-									node.parentNode.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
-									node.classList.add('selected');
-								}}"
-								>${d => d.name}</button>
-						</template>
-					</div>
-					<button id="combine-files-button" $click="${d => d.input = d.input
-						.map(file => `//---- ${file.name} ----\n\n${file.code}`)
-						.join('\n\n')
-					}">clear</button>
+		<template @if="${d => Array.isArray(d.input)}">
+			<div id="file-column">
+				<div id="file-list">
+					<template @foreach="{input}">
+						<button class="tab-left"
+							$click="${(d, e, node) => {
+								document.querySelector('#input').value = d.code;
+								node.parentNode.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
+								node.classList.add('selected');
+							}}"
+							>${d => d.name}</button>
+					</template>
 				</div>
-				<textarea id="input" readonly></textarea>
-			</template>
-			<template @if="${d => !Array.isArray(d.input)}">
-				<textarea id="input" placeholder="JS code" autofocus
-					$input-keypath="input"
-					$input-done="${run}"></textarea>
-			</template>
-		</div>
-		
-		<div id="results">
-			<div id="controls">
-				<button id="go-button" $click="${run}">minify</button>
-				<button id="options-button" $click="${d => d.optionsDialog = true}">options</button>
-				<div id="result-size">${d =>
-					(Array.isArray(d.input) ? d.input.map(f => f.code).join('') : d.input).length} → ${d => (d.output.error ? 'Error' : d.output.code.length + ' bytes')}</div>
-				<label>
-					<input type="checkbox" $input-keypath="live">
-					live
-				</label>
+				<button id="clear-files-button" $click="${d => d.input = d.input
+					.map(file => `//---- ${file.name} ----\n\n${file.code}`)
+					.join('\n\n')
+				}">clear</button>
 			</div>
-			<textarea id="output" placeholder="minified" readonly
-				$value="${d => d.output.error || d.output.code}"></textarea>
-		</div>
+			<textarea id="input" readonly></textarea>
+		</template>
+		<template @if="${d => !Array.isArray(d.input)}">
+			<textarea id="input" placeholder="JS code" autofocus
+				$input-keypath="input"
+				$input-done="${run}"></textarea>
+		</template>
+		
+		<button id="minify-button" $click="${run}">minify</button>
+		<button id="options-button" $click="${d => d.optionsDialog = true}">options</button>
+		<div id="result-size">${d =>
+			(Array.isArray(d.input) ? d.input.map(f => f.code).join('') : d.input).length} → ${d => (d.output.error ? 'Error' : d.output.code.length + ' bytes')}</div>
+		<label id="live">
+			<input type="checkbox" $input-keypath="live">
+			live
+		</label>
+		<textarea id="output" placeholder="minified" readonly
+			$value="${d => d.output.error || d.output.code}"></textarea>
 		
 		<template @if="{optionsDialog}">
 			<dialog $modal="1" $modal-close="${d => d.optionsDialog = false}">
@@ -204,16 +231,28 @@
 		<script src="../extra/log-dom.js"></script>
 		<script src="../extra/interaction.js"></script>
 		<script>
+			let notBefore = 0;
+			let runTimeout = null;
+		
 			function run(data) {
-				let $ = document.querySelector.bind(document);
+				let go = () => {
+					let $ = document.querySelector.bind(document);
 
-				let options = JSON.parse(JSON.stringify(data.options));
-				if (options.mangle && options.mangle.properties && options.mangle.properties.regex) {
-					options.mangle.properties.regex = new RegExp(options.mangle.properties.regex);
-				}
-				let inputCode = Array.isArray(data.input) ? data.input.map(f => f.code).join('\n;') : data.input;
-				let outputObj = UglifyJS.minify(inputCode, options);
-				data.output = outputObj;
+					let options = JSON.parse(JSON.stringify(data.options));
+					if (options.mangle && options.mangle.properties && options.mangle.properties.regex) {
+						options.mangle.properties.regex = new RegExp(options.mangle.properties.regex);
+					}
+					let inputCode = Array.isArray(data.input) ? data.input.map(f => f.code).join('\n;') : data.input;
+					let outputObj = UglifyJS.minify(inputCode, options);
+					data.output = outputObj;
+				};
+				clearTimeout(runTimeout);
+				setTimeout(() => {
+					let start = Date.now();
+					go();
+					let duration = Date.now() - start;
+					notBefore = Date.now() + duration; // only half the time
+				}, Math.max(notBefore - Date.now(), 0));
 			}
 		
 			function defaultOptions() {
@@ -239,24 +278,8 @@
 			});
 			
 			// Live updates, if enabled
-			let notBefore = 0;
-			let liveTimeout = null;
 			wrapped.addUpdates(data => {
-				let go = () => {
-					let start = Date.now();
-					run(data);
-					let duration = Date.now() - start;
-					notBefore = Date.now() + duration; // only half the time
-				};
-				if (data.live) {
-					if (Date.now() > notBefore) {
-						clearTimeout(liveTimeout);
-						go();
-					} else {
-						clearTimeout(liveTimeout);
-						setTimeout(go, notBefore - Date.now() + 10);
-					}
-				}
+				if (data.live) run(data);
 			});
 			
 			wrapped.syncHash(data => ({
