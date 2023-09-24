@@ -2,6 +2,24 @@
 let Matsui = (() => {
 	let isObject = data => (data && typeof data === 'object');
 	let makePlaceholderNode = () => document.createTextNode("");
+	function clearBetween(before, after) {
+		while (before.nextSibling && before.nextSibling != after) {
+			before.nextSibling.remove();
+		}
+	}
+	function makeClearable() {
+		let node = document.createDocumentFragment();
+		let before = makePlaceholderNode();
+		let after = makePlaceholderNode();
+		node.append(before, after);
+		return {
+			m_node: node,
+			m_replace: (...nodes) => {
+				clearBetween(before, after);
+				before.after(...nodes);
+			}
+		}
+	}
 
 	/*--- JSON Patch Merge stuff ---*/
 
@@ -468,10 +486,7 @@ let Matsui = (() => {
 
 			/* Switches between templates, based on the filtered list */
 			this.dynamic = innerTemplate => {
-				let node = document.createDocumentFragment();
-				let startNode = makePlaceholderNode();
-				let endNode = makePlaceholderNode();
-				node.append(startNode, endNode);
+				let clearable = makeClearable();
 				
 				let currentTemplate, currentUpdates;
 				let currentFilterObj = {};
@@ -480,19 +495,15 @@ let Matsui = (() => {
 					if (currentTemplate && currentFilterObj.filter(data)) {
 						return currentUpdates(data);
 					}
-					// Clear the previous render
-					while (startNode.nextSibling && startNode.nextSibling != endNode) {
-						startNode.nextSibling.remove();
-					}
 
 					currentTemplate = this.getForData(data, currentFilterObj);
 					let binding = currentTemplate(innerTemplate || this.dynamic);
 					currentUpdates = combineUpdates(binding.updates);
 					currentUpdates(data);
-					startNode.after(binding.node);
+					clearable.m_replace(binding.node);
 				};
 
-				return {node: node, updates: [update]};
+				return {node: clearable.m_node, updates: [update]};
 			}
 		}
 		
@@ -759,9 +770,7 @@ let Matsui = (() => {
 		let pop = () => {
 			let before = separators[separators.length - 2];
 			let after = separators.pop();
-			while (before.nextSibling && before.nextSibling != after) {
-				before.nextSibling.remove();
-			}
+			clearBetween(before, after);
 			after.remove();
 		}
 		let clear = () => {
@@ -832,27 +841,24 @@ let Matsui = (() => {
 	};
 	globalSet.transforms['if'] = (conditionalTemplate, dataFn, templateSet) => {
 		return innerTemplate => {
-			let start = makePlaceholderNode();
-			let end = makePlaceholderNode();
-			let node = document.createDocumentFragment();
-			node.append(start, end);
+			let clearable = makeClearable();
 
 			let conditionalUpdates = null;
 			return {
-				node: node,
+				node: clearable.m_node,
 				updates: [data => {
 					if (dataFn(data)) {
-						if (!conditionalUpdates) {
+						if (conditionalUpdates) {
+							conditionalUpdates(data);
+						} else {
 							let binding = conditionalTemplate(innerTemplate);
-							end.before(binding.node);
 							conditionalUpdates = combineUpdates(binding.updates);
+							conditionalUpdates(data);
+							clearable.m_replace(binding.node);
 						}
-						conditionalUpdates(data);
 					} else {
 						if (conditionalUpdates) {
-							while (start.nextSibling && start.nextSibling != end) {
-								start.nextSibling.remove();
-							}
+							clearable.m_replace();
 							conditionalUpdates = null;
 						}
 					}
@@ -860,6 +866,30 @@ let Matsui = (() => {
 			};
 		};
 	};
+	
+	function scoped(getTemplate) {
+		return innerTemplate => {
+			let combined; // combined updates
+
+			let clearable = makeClearable();
+			
+			return {
+				node: clearable.m_ode,
+				updates: [
+					data => {
+						let untracked = merge.withoutHidden(access.pierce(data));
+						// clear any previous renders
+						let template = getTemplate(untracked);
+						let binding = template(innerTemplate);
+						clearable.m_replace(binding.node);
+						combined = combineUpdates(binding.updates);
+					},
+					data => combined(data)
+				]
+			};
+		};
+	}
+	globalSet.transforms.scoped = t => t;
 	
 	function Wrapped(data, synchronous) {
 		let mergeTracked;
