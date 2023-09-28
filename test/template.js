@@ -162,7 +162,7 @@ Test("parse from element", (api, pass, fail, assert) => {
 		}
 	};
 	let templateSet = Matsui.global.extend();
-	templateSet.attributes['assert-number'] = (node, valueFn) => {
+	templateSet.attributes.assertNumber = (node, valueFn) => {
 		return data => {
 			let value = valueFn(data);
 			assert(typeof value === 'number');
@@ -178,6 +178,12 @@ Test("parse from element", (api, pass, fail, assert) => {
 		<div class="baz" $title="!\${d => d.baz.toLowerCase()}?" data-other="\${d=>d}">$: \${d => 5} :$</div>
 		<!-- attributes with just a single entry aren't converted to strings -->
 		<div class="bing" $assert-number="\${d=>d.bing.length}">#\${d=>d.bing.length*2}#</div>
+
+		<template name="uppercase">
+			\${data => data.toUpperCase()}
+		</template>
+		<div class="upper-foo">$uppercase{foo}</div>
+		<div class="upper-bar">$uppercase$(d => d.bar}</div>
 	`;
 	let elementTemplate = templateSet.fromElement(element);
 
@@ -189,6 +195,12 @@ Test("parse from element", (api, pass, fail, assert) => {
 		<div class="baz" $title="!\${d => d.baz.toLowerCase()}?" data-other="\${d=>d}">$: \${d => 5} :$</div>
 		<!-- attributes with just a single entry aren't converted to strings -->
 		<div class="bing" $assert-number="\${d=>d.bing.length}">#\${d=>d.bing.length*2}#</div>
+		
+		<template name="uppercase">
+			\${data => data.toUpperCase()}
+		</template>
+		<div class="upper-foo">$uppercase{foo}</div>
+		<div class="upper-bar">$uppercase$(d => d.bar}</div>
 	`;
 	templateSet.addElement('named-div', divElement);
 	let divTemplate = templateSet.getNamed('named-div');
@@ -214,6 +226,9 @@ Test("parse from element", (api, pass, fail, assert) => {
 		assert(binding.node.querySelector('.baz').title == '!baz?');
 		assert(binding.node.querySelector('.bing').innerHTML === '#number:8#');
 		assert(binding.node.querySelector('.bing').x_value === 4);
+		
+		assert(binding.node.querySelector('.upper-foo').innerHTML == 'string:_FOO_');
+		assert(binding.node.querySelector('.upper-bar').innerHTML == 'string:_BAR_');
 	}
 
 	testTemplate(elementTemplate);
@@ -262,7 +277,7 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		}
 	};
 	let templateSet = Matsui.global.extend();
-	templateSet.attributes['assert-number'] = (node, valueFn) => {
+	templateSet.attributes.assertNumber = (node, valueFn) => {
 		return data => {
 			let value = valueFn(data);
 			assert(typeof value === 'number');
@@ -277,6 +292,12 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		<div class="baz" $title="!${d => d.baz.toLowerCase()}?" data-other="${d=>d}">$: ${d => 5} :$</div>
 		<!-- attributes with just a single entry aren't converted to strings -->
 		<div class="bing" $assert-number="${d=>d.bing.length}">#${d=>d.bing.length*2}#</div>
+
+		<template name="uppercase">
+			\${data => data.toUpperCase()}
+		</template>
+		<div class="upper-foo">$uppercase{foo}</div>
+		<div class="upper-bar">$uppercase$(d => d.bar}</div>
 	`;
 	templateSet.addTag("named-tag")`
 		<div class="foo" $title="{foo}" data-other="{foo}">{foo}</div>
@@ -285,6 +306,12 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		<div class="baz" $title="!${d => d.baz.toLowerCase()}?" data-other="${d=>d}">$: ${d => 5} :$</div>
 		<!-- attributes with just a single entry aren't converted to strings -->
 		<div class="bing" $assert-number="${d=>d.bing.length}">#${d=>d.bing.length*2}#</div>
+
+		<template name="uppercase">
+			\${data => data.toUpperCase()}
+		</template>
+		<div class="upper-foo">$uppercase{foo}</div>
+		<div class="upper-bar">$uppercase$(d => d.bar}</div>
 	`;
 	let tagTemplateNamed = templateSet.getNamed("named-tag");
 	
@@ -309,6 +336,9 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		assert(binding.node.querySelector('.baz').title == '!baz?');
 		assert(binding.node.querySelector('.bing').innerHTML === '#number:8#');
 		assert(binding.node.querySelector('.bing').x_value === 4);
+		
+		assert(binding.node.querySelector('.upper-foo').innerHTML == 'string:_FOO_');
+		assert(binding.node.querySelector('.upper-bar').innerHTML == 'string:_BAR_');
 	}
 
 	testTemplate(tagTemplate);

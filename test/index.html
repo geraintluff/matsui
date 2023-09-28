@@ -10,7 +10,11 @@
 	<body>
 		<script>
 			let usingMinified = /\?minified/.test(location.href);
-			document.write(`<script src="../matsui${usingMinified ? '.min' : ''}.js"></${'script'}>`);
+			if (usingMinified) {
+				document.write(`<script src="../release/latest/matsui.min.js"></${'script'}>`);
+			} else {
+				document.write(`<script src="../matsui.js"></${'script'}>`);
+			}
 		</script>
 		<script>
 			let api = Matsui;

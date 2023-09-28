@@ -21,10 +21,21 @@ let Matsui = (() => {
 		}
 	}
 
+	// pierces all Matsui proxies to get the underlying data (for equality comparison)
+	let rawKey = Symbol();
+	function getRaw(value) {
+		if (!isObject(value)) return value;
+		let raw = value[rawKey];
+		while (raw && raw != value) {
+			value = raw;
+			raw = value[rawKey];
+		}
+		return value;
+	}
+
 	/*--- JSON Patch Merge stuff ---*/
 
 	// Attach a hidden merge to data, which use later to decide what to re-render
-	let rawKey = Symbol();
 	let hiddenMergeKey = Symbol(), hiddenMergePierceKey = Symbol();
 	let noChangeSymbol = Symbol('no change');
 
@@ -168,16 +179,6 @@ let Matsui = (() => {
 
 	/*--- Access-tracking ---*/
 	
-	function getRaw(value) {
-		if (!isObject(value)) return value;
-		let raw = value[rawKey];
-		while (raw && raw != value) {
-			value = raw;
-			raw = value[rawKey];
-		}
-		return value;
-	}
-
 	let pierceKey = Symbol();
 	let accessedKey = Symbol("accessed");
 	let access = {
@@ -198,7 +199,7 @@ let Matsui = (() => {
 						trackerObj[accessedKey] = accessedKey;
 						return value;
 					} else if (typeof value === 'function' && !value.prototype) {
-						trackerObj[accessedKey] = accessedKey; // arrow functions, bound functions, and some native methods - more likely to not go through 'this' if they access stuff
+						trackerObj[accessedKey] = accessedKey; // arrow functions, bound functions, and some native methods have no .prototype - more likely to not go through 'this' if they access stuff
 						// TODO: now we've done that, should we return a bound version?
 					}
 					
@@ -273,19 +274,33 @@ let Matsui = (() => {
 
 	/*--- Pre-supplied templates and template-construction methods ---*/
 	
-	function templateFromIds(templateSet, ids) {
-		let result = (t => t(t)); // Functional programming, babeeeyy
-		while (ids.length) {
-			let outerId = ids.pop();
-			let outerTemplate = templateSet.getNamed(outerId);
-			let inner = result;
-			result = fallback => outerTemplate(_ => inner(fallback));
-		}
-		return result;
+//	function templateFromIds(templateSet, ids) {
+//		if (!ids.length) return t => t(templateSet.dynamic);
+//		let result = templateSet.getNamed(ids.pop());
+//		while (ids.length) {
+//			let outerId = ids.pop();
+//			let outerTemplate = templateSet.getNamed(outerId);
+//			let inner = result;
+//			result = fallback => outerTemplate(_ => inner(fallback));
+//		}
+//		return result;
+//	}
+
+	function instantiateTemplateWithIds(templateSet, ids, innerTemplate) {
+		let named = ids.map(name => templateSet.getNamed(name));
+		function getTemplate(depth) {
+			if (depth >= ids.length) return innerTemplate;
+			let template = named[depth];
+			return _ => {
+				return template(getTemplate(depth + 1));
+			};
+		};
+		return getTemplate(0)(templateSet.dynamic);
 	}
 	
 	// Arbitrarily-picked vendor-reserved Unicode points
 	let placeholderPrefix = '\uF74A', placeholderSuffix = '\uF74B';
+	/*
 	// Shouldn't appear in text other than from here, so just stick an index between them
 	let placeholderRegex = /\uF74A[0-9]+\uF74B/ug;
 	function templateFromElementPlaceholders(element, placeholderMap, templateSet) {
@@ -471,6 +486,232 @@ let Matsui = (() => {
 			};
 		};
 	}
+	*/
+	
+	function defaultAttributeFunction(node, attrKey, handler) {
+		if (('on' + attrKey) in node) {
+			node.addEventListener(attrKey, handler);
+		} else if (attrKey in node) {
+			return d => {
+				node[attrKey] = handler();
+			};
+		} else {
+			return d => {
+				node.setAttribute(attrKey, handler());
+			};
+		}
+	}
+	
+	let taggedExprRegex = /((\$[a-z0-9_]+)*)(\{([a-z0-9_=-]+)\}|\uF74A[0-9]+\uF74B)/uig;
+	let exprRegex = /(\{[a-z0-9_=-]+\}|\uF74A[0-9]+\uF74B)/uig;
+	function getCachableTemplate(element) { // TODO: actually cache it here, why not?
+		let cloneable = element.content || element;
+		let setupList = [];
+		
+		// text node: split by `$...$...{key}` or `$...$...PLACEHOLDER`
+		function walkTextNode(templateNode, nodePath) {
+			let nodeValue = templateNode.nodeValue;
+			let match, prevIndex = 0;
+			while ((match = taggedExprRegex.exec(nodeValue))) {
+				let prefixString = nodeValue.substr(prevIndex, match.index - prevIndex);
+				prevIndex = taggedExprRegex.lastIndex;
+				
+				let ids = match[1].split('$').slice(1); // $...$... section
+				
+				let plainOrPlaceholder = match[3], key = match[4];
+				let fixedValue = key && (key == '=' ? (d => d) : (d => d[key]));
+				setupList.push({
+					m_nodePath: nodePath,
+					m_fn: (node, placeholderMap, updates, innerTemplate, templateSet) => {
+						if (prefixString) node.before(prefixString);
+						let value = fixedValue || placeholderMap[plainOrPlaceholder];
+						if (typeof value === 'function') {
+							let binding = instantiateTemplateWithIds(templateSet, ids, innerTemplate);
+							let combined = combineUpdates(binding.updates);
+							node.before(binding.node);
+							updates.push(data => {
+								combined(value(data));
+							});
+						} else {
+							node.before(value + "");
+						}
+					}
+				});
+			}
+			if (prevIndex > 0) { // any remaining parts of the string (if we found any matches)
+				let suffix = nodeValue.substr(prevIndex);
+				setupList.push({
+					m_nodePath: nodePath,
+					m_fn: (node) => {
+						if (suffix) {
+							node.nodeValue = suffix;
+						} else {
+							node.remove();
+						}
+					}
+				});
+			}
+		}
+		
+		function walkAttribute(attr, nodePath) {
+			if (attr.name[0] == '$') {
+				let name = attr.name.substr(1);
+				// dash-separated to camelCase
+				let attrKey = name.toLowerCase().replace(/-+(.)/g, (_, c) => c.toUpperCase());
+				
+				let parts = attr.value.split(exprRegex);
+				for (let i = 1; i < parts.length; i += 2) {
+					let plainOrPlaceholder = parts[i];
+					if (plainOrPlaceholder[0] == '{') {
+						let key = plainOrPlaceholder.substr(1, plainOrPlaceholder.length - 2);
+						if (key == '=') {
+							parts[i] = (pMap => d => d);
+						} else {
+							parts[i] = (pMap => d => d[key]);
+						}
+					} else {
+						parts[i] = (pMap => pMap[plainOrPlaceholder]);
+					}
+				}
+				parts = parts.filter(x => (x != ''));
+
+				setupList.push({
+					m_nodePath: nodePath,
+					m_fn: (node, placeholderMap, updates, _, templateSet) => {
+						let fullParts = parts.map(p => {
+							if (typeof p == 'function') return p(placeholderMap);
+							return p;
+						});
+						let valueMap;
+						if (fullParts.length == 1 && typeof fullParts[0] == 'function') {
+							// Attribute is just a single value, so return it without casting to string
+							valueMap = fullParts[0];
+						} else {
+							valueMap = data => {
+								return fullParts.map(p => {
+									if (typeof p == 'function') return p(data);
+									return p;
+								}).join("");
+							};
+						}
+
+						let latestData = null;
+						let valueFn = () => valueMap(latestData);
+
+						let maybeUpdate;
+						if (attrKey in templateSet.attributes) {
+							maybeUpdate = templateSet.attributes[attrKey](node, valueFn);
+						} else {
+							maybeUpdate = defaultAttributeFunction(node, attrKey, valueFn);
+						}
+						updates.push(data => {
+							latestData = data;
+							if (maybeUpdate) maybeUpdate(data);
+							latestData = merge.withoutHidden(data);
+						});
+					}
+				});
+			}
+		}
+		
+		function walk(node, nodePath) {
+			if (node.nodeType === 3) {
+				walkTextNode(node, nodePath);
+			} else if (node.nodeType === 1) {
+				for (let attr of node.attributes) {
+					walkAttribute(attr, nodePath);
+				}
+				
+				let childTemplates = [];
+				node.childNodes.forEach((child, index) => {
+					if (child.tagName == 'TEMPLATE') {
+						childTemplates.push({
+							m_index: index,
+							m_templateChild: child
+						});
+						child.replaceWith(makePlaceholderNode());
+					}
+				});
+				if (childTemplates.length) {
+					let templateNode = node;
+					throw Error("not implemented");
+
+										function replaceExprs(text) {
+											let prevEnd = 0;
+											let match, result = [];
+											// Find end of expression by balanced bracket/quote matching
+											while ((match = startRegex.exec(text))) {
+												result.push(text.substr(prevEnd, match.index - prevEnd)); // prefix/joiner
+												let stack = ['}'];
+												let startExpr = match.index + 2, endExpr = startExpr;
+												while (endExpr < text.length && stack.length) {
+													let closeChar = stack[stack.length - 1];
+													let c = text[endExpr++];
+													if (c == '\\') {
+														++endExpr;
+													} else if (c == closeChar) {
+														stack.pop();
+													} else if (closeChar == '`') {
+														if (c == '$' && text[endExpr + 1] == "{") {
+															stack.push("}");
+															++endExpr;
+														}
+													} else if (closeChar != '"' && closeChar != "'") {
+														if (c == '{') {
+															stack.push("}");
+														} else if (c == '"' || c == "'" || c == '`') {
+															stack.push(c);
+														}
+													}
+												}
+												if (stack.length) throw Error(`expected ${stack[0]}: ` + text);
+												let expr = text.substr(startExpr, endExpr - startExpr - 1);
+												try { // As well as syntax errors, will fail under CSP, so catch to be helpful
+													let value = new Function('return(' + expr + ')')();
+													let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
+													placeholderMap[placeholder] = value;
+													result.push(placeholder);
+												} catch (e) {
+													console.error(e);
+													result.push(`\{${e.message}\}`);
+												}
+												startRegex.lastIndex = endExpr;
+												prevEnd = endExpr;
+											}
+											result.push(text.substr(prevEnd));
+											if (result.length > 1) {
+												console.log(result);
+												debugger;
+											}
+											return result.join("");
+										}
+				}
+			}
+			if (node.childNodes) {
+				node.childNodes.forEach((child, index) => {
+					walk(child, nodePath.concat(index));
+				});
+			}
+		}
+		walk(cloneable, []);
+		
+		return (placeholderMap, templateSet) => innerTemplate => {
+			let node = cloneable; // fill the node in-place first time
+			cloneable = cloneable.cloneNode(true); // store a clone for next time
+			
+			let subNodes = setupList.map(entries => {
+				let subNode = node;
+				entries.m_nodePath.forEach(index => subNode = subNode.childNodes[index]);
+				return subNode;
+			});
+			let updates = [];
+			setupList.forEach((entry, index) => {
+				entry.m_fn(subNodes[index], placeholderMap, updates, innerTemplate, templateSet);
+			});
+			
+			return {node: node, updates: updates};
+		};
+	}
 
 	let templateCache = Symbol();
 	class TemplateSet {
@@ -568,7 +809,7 @@ let Matsui = (() => {
 			throw Error("No template for data");
 		}
 		
-		fromElement(element, preventEval) {
+		fromElement(element) {
 			if (typeof element === 'string') {
 				let el = document.querySelector(element);
 				if (!el) throw Error("Invalid element:" + element);
@@ -576,165 +817,47 @@ let Matsui = (() => {
 			}
 			if (element[templateCache]) return element[templateCache];
 			
-			let placeholderMap = isObject(preventEval) ? preventEval : {};
-			let placeholderIndex = Object.keys(placeholderMap).length;
+			let placeholderMap = {}, placeholderIndex = 0;
+			let startRegex = /\$\{/g;
 
-			let replaceString = (text, templateSet) => {
-				let result = [];
-				let start = /((\$[a-z_-]+)*)(\$?)\{/gi;
-				for (;;) {
-					let startLiteral = start.lastIndex;
-					let match = start.exec(text);
-					if (!match) {
-						result.push(text.substr(startLiteral));
-						break;
-					}
-					result.push(text.substr(startLiteral, match.index - startLiteral));
-					
-					let valueEntry = fn => {
-						let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
-						placeholderMap[placeholder] = {
-							m_template: templateFromIds(
-								this,
-								match[1].split('$').slice(1)
-							),
-							m_value: fn
-						};
-						result.push(placeholder);
-					};
-
-					let startExpr = start.lastIndex, endExpr = startExpr;
-					if (match[3]) { // ${...} expression
-						if (preventEval) {
-							result.push(match[0]);
-							continue;
-						}
-						let stack = ['}'];
-						while (endExpr < text.length && stack.length) {
-							let closeChar = stack[stack.length - 1];
-							let c = text[endExpr++];
-							if (c == '\\') {
-								++endExpr;
-							} else if (c == closeChar) {
-								stack.pop();
-							} else if (closeChar == '`') {
-								if (c == '$' && text[endExpr + 1] == "{") {
-									stack.push("}");
-									++endExpr;
-								}
-							} else if (closeChar != '"' && closeChar != "'") {
-								if (c == '{') {
-									stack.push("}");
-								} else if (c == '"' || c == "'" || c == '`') {
-									stack.push(c);
-								}
-							}
-						}
-						if (stack.length) throw Error(`expected ${stack[0]}: ` + text);
-						let expr = text.substr(startExpr, endExpr - startExpr - 1);
-						try { // As well as syntax errors, will fail under CSP, so catch to be helpful
-							valueEntry(new Function('return(' + expr + ')')());
-						} catch (e) {
-							console.error(e);
-							result.push(`${e.message}`);
-						}
-						start.lastIndex = endExpr;
-					} else { // A plain {...} expression
-						if (text.substr(startExpr, 2) == '=}') {
-							valueEntry(d => d);
-							start.lastIndex += 2;
-						} else {
-							while (/[a-z_-]/i.test(text[endExpr])) {
-								++endExpr;
-							};
-							if (endExpr > startExpr && text[endExpr] === '}') {
-								let key = text.substr(startExpr, endExpr - startExpr);
-								valueEntry(d => d[key]);
-								start.lastIndex += key.length + 1;
-							} else {
-								result.push(match[0]);
-							}
-						}
-					}
-				}
-				result = result.join("");
-				return (result != text) ? result : null;
-			};
-			
-			function walk(node, templateSet) {
-				if (node.childNodes) {
-					let childSet = null;
-					// scan for sub-templates
-					node.childNodes.forEach(child => {
-						if (child.nodeType !== 1) return;
-						if (child.tagName === 'TEMPLATE') {
-							let name = child.id || child.getAttribute('name');
-							for (let attr of child.attributes) {
-								if (attr.name[0] === '@') {
-									let newValue = replaceString(attr.value, templateSet);
-									if (newValue !== null) attr.value = newValue;
-								}
-							}
-							if (name) {
-								if (!childSet) childSet = templateSet.extend();
-								childSet.add(name, innerTmpl => {
-									// it will be cached on the child element by the time this is called
-									return child[templateCache](innerTmpl);
-								});
-							}
-							walk(child.content, templateSet); // substitute the functions etc. in the same pass
-						}
-					});
-					if (childSet) templateSet = childSet;
-				}
-				if (node.nodeType === 1) { // element
+			function walk(node) {
+				if (node.nodeType === 3) {
+					node.nodeValue == replaceExprs(node.nodeValue);
+				} else if (node.nodeType === 1) {
 					for (let attr of node.attributes) {
 						if (attr.name[0] == '$') {
-							let newValue = replaceString(attr.value, templateSet);
-							if (newValue !== null) attr.value = newValue;
+							attr.value = replaceExprs(attr.value);
 						}
 					}
-				} else if (node.nodeType === 3) { // text
-					let newValue = replaceString(node.nodeValue, templateSet);
-					if (newValue !== null) node.nodeValue = newValue;
 				}
 				if (node.childNodes) {
-					node.childNodes.forEach(child => walk(child, templateSet));
+					node.childNodes.forEach(walk);
 				}
 			}
-			walk(element.content || element, this);
-			return element[templateCache] = templateFromElementPlaceholders(element, placeholderMap, this);
+			walk(element);
+
+			let pending = getCachableTemplate(element);
+			return element[templateCache] = pending(placeholderMap, this);
 		}
 		
 		fromTag(strings, ...values) {
 			let placeholderMap = {};
-			let placeholderIndex = 0;
-			
+			for (let i = 0; i < values.length; ++i) {
+				let placeholder = placeholderPrefix + i + placeholderSuffix;
+				placeholderMap[placeholder] = values[i];
+			}
+
 			let parts = [strings[0]];
 			for (let i = 0; i < values.length; ++i) {
-				if (typeof values[i] === 'function') {
-					let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
-					let entry = {
-						m_template: t => t(t),
-						m_value: values[i]
-					};
-					// Steal prefixes from the previous string
-					parts[i] = parts[i].replace(/(\$[a-z_-]+)*$/, prefixes => {
-						entry.m_template = templateFromIds(this, prefixes.split('$').slice(1));
-						return "";
-					});
-					placeholderMap[placeholder] = entry;
-					parts.push(placeholder);
-				} else {
-					parts.push(values[i] + "");
-				}
-				
+				let placeholder = placeholderPrefix + i + placeholderSuffix;
+				parts.push(placeholder);
 				parts.push(strings[i + 1]);
 			}
-			
+
 			let element = document.createElement('template');
 			element.innerHTML = parts.join("");
-			return this.fromElement(element, placeholderMap);
+			let pending = getCachableTemplate(element);
+			return pending(placeholderMap, this);
 		}
 	}
 
