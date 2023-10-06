@@ -33,6 +33,7 @@
 
 			let renderData = {
 				message: 'loading...',
+				tests: [],
 				failed: false,
 				minified: usingMinified
 			};
@@ -68,7 +69,7 @@
 					let testFail = (m) => {
 						clearTimeout(timeout);
 						fail(m);
-						throw Error("fail()"); // stops execution of the test, and also helps debugging
+						throw Error("fail()"); // stops execution of the test
 					};
 					let assert = (check, message) => {
 						if (!check) testFail(message || "failed assertion check");

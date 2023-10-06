@@ -162,6 +162,15 @@ Test("parse from element", (api, pass, fail, assert) => {
 		}
 	};
 	let templateSet = Matsui.global.extend();
+	templateSet.add("should-not-be-called", innerTemplate => {
+		let node = document.createTextNode("");
+		return {
+			node: node,
+			updates: [data => {
+				node.nodeValue = "Should not be called: " + data;
+			}]
+		}
+	}, data => true);
 	templateSet.attributes.assertNumber = (node, valueFn) => {
 		return data => {
 			let value = valueFn(data);
@@ -179,11 +188,9 @@ Test("parse from element", (api, pass, fail, assert) => {
 		<!-- attributes with just a single entry aren't converted to strings -->
 		<div class="bing" $assert-number="\${d=>d.bing.length}">#\${d=>d.bing.length*2}#</div>
 
-		<template name="uppercase">
-			\${data => data.toUpperCase()}
-		</template>
+		<template name="uppercase">\${data => data.toUpperCase()}</template>
 		<div class="upper-foo">$uppercase{foo}</div>
-		<div class="upper-bar">$uppercase$(d => d.bar}</div>
+		<div class="upper-bar">$uppercase\${d => d.bar}</div>
 	`;
 	let elementTemplate = templateSet.fromElement(element);
 
@@ -196,11 +203,9 @@ Test("parse from element", (api, pass, fail, assert) => {
 		<!-- attributes with just a single entry aren't converted to strings -->
 		<div class="bing" $assert-number="\${d=>d.bing.length}">#\${d=>d.bing.length*2}#</div>
 		
-		<template name="uppercase">
-			\${data => data.toUpperCase()}
-		</template>
+		<template name="uppercase">\${data => data.toUpperCase()}</template>
 		<div class="upper-foo">$uppercase{foo}</div>
-		<div class="upper-bar">$uppercase$(d => d.bar}</div>
+		<div class="upper-bar">$uppercase\${d => d.bar}</div>
 	`;
 	templateSet.addElement('named-div', divElement);
 	let divTemplate = templateSet.getNamed('named-div');
@@ -293,11 +298,9 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		<!-- attributes with just a single entry aren't converted to strings -->
 		<div class="bing" $assert-number="${d=>d.bing.length}">#${d=>d.bing.length*2}#</div>
 
-		<template name="uppercase">
-			\${data => data.toUpperCase()}
-		</template>
+		<template name="uppercase">${data => data.toUpperCase()}</template>
 		<div class="upper-foo">$uppercase{foo}</div>
-		<div class="upper-bar">$uppercase$(d => d.bar}</div>
+		<div class="upper-bar">$uppercase${d => d.bar}</div>
 	`;
 	templateSet.addTag("named-tag")`
 		<div class="foo" $title="{foo}" data-other="{foo}">{foo}</div>
@@ -307,11 +310,9 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		<!-- attributes with just a single entry aren't converted to strings -->
 		<div class="bing" $assert-number="${d=>d.bing.length}">#${d=>d.bing.length*2}#</div>
 
-		<template name="uppercase">
-			\${data => data.toUpperCase()}
-		</template>
+		<template name="uppercase">${data => data.toUpperCase()}</template>
 		<div class="upper-foo">$uppercase{foo}</div>
-		<div class="upper-bar">$uppercase$(d => d.bar}</div>
+		<div class="upper-bar">$uppercase${d => d.bar}</div>
 	`;
 	let tagTemplateNamed = templateSet.getNamed("named-tag");
 	
