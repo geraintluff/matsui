@@ -287,7 +287,7 @@ let Matsui = (() => {
 	}
 	
 	let exprStartRegex = /\$\{/g;
-	function replace$Exprs(text, foundExpr) {
+	function replaceExprs(text, foundExpr) {
 		let prevEnd = 0;
 		let match, result = [];
 		// Find end of expression by balanced bracket/quote matching
@@ -410,7 +410,6 @@ let Matsui = (() => {
 				
 		function walkTextNode(templateNode, nodePath) {
 			let nodeValue = templateNode.nodeValue;
-			let parts = [];
 			let match, prevIndex = 0;
 			while ((match = taggedExprRegex.exec(nodeValue))) {
 				let prefixString = nodeValue.substr(prevIndex, match.index - prevIndex);
@@ -659,53 +658,52 @@ let Matsui = (() => {
 				element = el;
 			}
 			if (!element[elementTemplateCache]) {
-				// Concatenates ${...} and <script>s into JS code which produces a placeholder object
-				let placeholderMap = {}, placeholderIndex = 0;
+				// Concatenates ${...} and <script>s into JS code which fills out a placeholder object
+				let placeholderIndex = 0;
 				let objArg = '__matsui_template_map';
-				function walk(node, codeParts) {
+				let codeParts = [];
+				function walk(node) {
 					function foundExpr(expr) {
 						let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
 						codeParts.push(`;${objArg}[${JSON.stringify(placeholder)}]=(${expr});`);
 						return placeholder;
 					}
-					function walkChild(c) {
-						let subParts = [];
-						walk(c, subParts);
-						if (subParts.length) { // each element executes in their own scope
-							codeParts.push('(()=>{');
-							subParts.forEach(p => codeParts.push(p));
-							codeParts.push('})();');
-						}
-					}
+
 					if (node.nodeType === 3) {
-						node.nodeValue = replace$Exprs(node.nodeValue, foundExpr);
+						let startIndex = placeholderIndex;
+						let replacement = replaceExprs(node.nodeValue, foundExpr);
+						if (placeholderIndex > startIndex) { // if we found any expressions, the index increments
+							node.nodeValue = replacement;
+						}
 					} else if (node.nodeType === 1) {
 						if (node.tagName == 'SCRIPT') {
-							return codeParts.push(node.textContent);
+							if (node.getRootNode().nodeType == 11) { // document fragment
+								node.replaceWith(makePlaceholderNode());
+								return codeParts.push(node.textContent);
+							}
 						}
 						if (node.tagName == 'TEMPLATE') {
-							return walkChild(node.content);
+							codeParts.push('(()=>{'); // sub-templates execute in their own scope
+							walk(node.content);
+							codeParts.push('})();');
+							return;
 						}
 						for (let attr of node.attributes) {
 							if (attr.name[0] == '$') {
-								attr.value = replace$Exprs(attr.value, foundExpr);
+								attr.value = replaceExprs(attr.value, foundExpr);
 							}
 						}
 					}
 					if (node.childNodes) {
-						node.childNodes.forEach(walkChild);
+						node.childNodes.forEach(walk);
 					}
 				}
-				let codeParts = [];
 				let content = element.content || element;
 				walk(content, codeParts);
+
 				let fillPlaceholderMap = (_ => _);
 				if (codeParts.length) {
-					let args = objArg;
-//					if (element.hasAttribute('@scoped')) {
-//						args += ',' + element.getAttribute('@scoped');
-//					} // can't work here, because when present it needs to delay template evaluation until it has the data - or actually, maybe that's not true.  Maybe it *could* be a TemplateSet transform?  What would the transform API need to look like for that to be possible?
-					fillPlaceholderMap = new Function(args, codeParts.join('\n'));
+					fillPlaceholderMap = new Function(objArg, codeParts.join('\n'));
 				}
 				let pendingTemplate = getPendingTemplate(content, element);
 				element[elementTemplateCache] = templateSet => {
@@ -874,19 +872,19 @@ let Matsui = (() => {
 		};
 	};
 
-	function scoped(getTemplate) {
+	function scoped(untrackedDataToTemplate) {
 		return innerTemplate => {
 			let combined; // combined updates
 
 			let clearable = makeClearable();
 			
 			return {
-				node: clearable.m_ode,
+				node: clearable.m_node,
 				updates: [
 					data => {
+						// piercing the data only re-triggers when the object (or plain value) is replaced
 						let untracked = merge.withoutHidden(access.pierce(data));
-						// clear any previous renders
-						let template = getTemplate(untracked);
+						let template = untrackedDataToTemplate(untracked);
 						let binding = template(innerTemplate);
 						clearable.m_replace(binding.node);
 						combined = combineUpdates(binding.updates);
@@ -991,6 +989,8 @@ let Matsui = (() => {
 		combineUpdates: combineUpdates,
 
 		global: globalSet,
+		scoped: scoped,
+
 		Wrapped: Wrapped,
 		wrap: data => new Wrapped(data),
 		addTo: (element, data, template) => {

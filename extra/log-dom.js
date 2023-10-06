@@ -5,7 +5,10 @@
 		} else if (record.type == "attribute") {
 			console.log("attr:", record.attributeName, record.target.getAttribute(record.attributeName));
 		} else {
-			console.log("add", record.addedNodes, "remove", record.removedNodes);
+			record.addedNodes.forEach(node => {
+				console.log("add", node)
+			});
+			record.removedNodes.forEach(node => console.log("remove", node));
 		}
 	});
 })).observe(document.body, {
