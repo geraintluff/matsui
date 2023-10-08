@@ -363,10 +363,10 @@ let Matsui = (() => {
 			}
 		};
 	}
-	function getContentIfTemplate(element) {
-		if (element.tagName == 'TEMPLATE') return element.content;
+	function isTemplate(element) {
+		if (element.tagName == 'TEMPLATE') return true;
 		for (let attr of element.attributes || []) {
-			if (attr.name[0] == '@') return element;
+			if (attr.name[0] == '@') return true;
 		}
 	}
 	// $dash-separated or @dash-separated => camelCase
@@ -391,8 +391,9 @@ let Matsui = (() => {
 	let placeholderPrefix = '\uF74A', placeholderSuffix = '\uF74B';
 	let exprRegex = /(\{[a-z0-9_=-]+\}|\uF74A[0-9]+\uF74B)/uig;
 	let taggedExprRegex = /((\$[a-z0-9_-]+)*)(\{([a-z0-9_=-]+)\}|\uF74A[0-9]+\uF74B)/uig;
-
-	function getPendingTemplate(cloneable, definitionElement) {
+	let subTemplatePlaceholderKey = Symbol();
+	function getPendingTemplate(definitionElement) {
+		let cloneable = definitionElement.content || definitionElement;
 		let setupTemplateSet = [];
 
 		// immediate <template> children with name="..." extend the template set
@@ -402,7 +403,10 @@ let Matsui = (() => {
 				let name = child.getAttribute('name');
 				if (name) {
 					hasNamedChildren = true;
-					namedChildTemplates[name] = getPendingTemplate(child.content, child);
+					namedChildTemplates[name] = {
+						m_pending: getPendingTemplate(child),
+						m_placeholderKey: child[subTemplatePlaceholderKey]
+					};
 					child.remove();
 				}
 			}
@@ -484,11 +488,17 @@ let Matsui = (() => {
 			if (templateNode.nodeType == 3) {
 				walkTextNode(templateNode, nodePath);
 			} else if (templateNode.nodeType === 1) {
-				let templateContent = getContentIfTemplate(templateNode);
-				if (templateContent) { // render template in-place
-					let pendingInPlaceTemplate = getPendingTemplate(templateContent, templateNode);
+				if (isTemplate(templateNode)) { // render template in-place
+					let subMapKey = templateNode[subTemplatePlaceholderKey];
+					let pendingTemplate = getPendingTemplate(templateNode);
 					setupTemplateSet.push((templateSet, placeholderMap) => {
-						let inPlaceTemplate = pendingInPlaceTemplate(templateSet, placeholderMap);
+						let subPlaceholderMap = {};
+						if (subMapKey) {
+							placeholderMap[subMapKey](subPlaceholderMap);
+						} else {
+							subPlaceholderMap = placeholderMap;
+						}
+						let inPlaceTemplate = pendingTemplate(templateSet, subPlaceholderMap);
 						return {
 							m_nodePath: nodePath,
 							m_fn: (node, updates, innerTemplate) => {
@@ -523,7 +533,14 @@ let Matsui = (() => {
 			if (hasNamedChildren) {
 				templateSet = templateSet.extend();
 				for (let name in namedChildTemplates) {
-					let template = namedChildTemplates[name](templateSet, placeholderMap);
+					let obj = namedChildTemplates[name];
+					let subPlaceholderMap = {}, subMapKey = obj.m_placeholderKey;
+					if (subMapKey) {
+						placeholderMap[subMapKey](subPlaceholderMap);
+					} else {
+						subPlaceholderMap = placeholderMap;
+					}
+					let template = obj.m_pending(templateSet, subPlaceholderMap);
 					templateSet.add(name, template);
 				}
 			}
@@ -662,7 +679,7 @@ let Matsui = (() => {
 				let placeholderIndex = 0;
 				let objArg = '__matsui_template_map';
 				let codeParts = [];
-				function walk(node) {
+				function walk(node, ignoreTemplate) {
 					function foundExpr(expr) {
 						let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
 						codeParts.push(`;${objArg}[${JSON.stringify(placeholder)}]=(${expr});`);
@@ -677,15 +694,18 @@ let Matsui = (() => {
 						}
 					} else if (node.nodeType === 1) {
 						if (node.tagName == 'SCRIPT') {
-							if (node.getRootNode().nodeType == 11) { // document fragment
+							if (node.getRootNode().nodeType == 11) { // document fragment (which means it's not part of the main document)
 								node.replaceWith(makePlaceholderNode());
 								return codeParts.push(node.textContent);
 							}
 						}
-						if (node.tagName == 'TEMPLATE') {
-							codeParts.push('(()=>{'); // sub-templates execute in their own scope
-							walk(node.content);
-							codeParts.push('})();');
+						if (isTemplate(node) && !ignoreTemplate) {
+							let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
+							node[subTemplatePlaceholderKey] = placeholder;
+							// sub-templates have their own placeholder-filling function
+							codeParts.push(`;${objArg}[${JSON.stringify(placeholder)}]=${objArg}=>{`);
+							walk(node.content || node, true);
+							codeParts.push('};');
 							return;
 						}
 						for (let attr of node.attributes) {
@@ -695,17 +715,18 @@ let Matsui = (() => {
 						}
 					}
 					if (node.childNodes) {
-						node.childNodes.forEach(walk);
+						node.childNodes.forEach(c => walk(c));
 					}
 				}
 				let content = element.content || element;
-				walk(content, codeParts);
+				walk(content, true);
 
 				let fillPlaceholderMap = (_ => _);
 				if (codeParts.length) {
+					console.log(codeParts.join('\n'));
 					fillPlaceholderMap = new Function(objArg, codeParts.join('\n'));
 				}
-				let pendingTemplate = getPendingTemplate(content, element);
+				let pendingTemplate = getPendingTemplate(element);
 				element[elementTemplateCache] = templateSet => {
 					let map = {};
 					fillPlaceholderMap(map);
@@ -728,7 +749,7 @@ let Matsui = (() => {
 
 				let element = document.createElement('template');
 				element.innerHTML = parts.join("");
-				cached = getPendingTemplate(element.content, element);
+				cached = getPendingTemplate(element);
 				tagCache.set(strings, cached);
 			}
 
