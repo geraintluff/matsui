@@ -407,6 +407,7 @@ let Matsui = (() => {
 					hasNamedChildren = true;
 					namedChildTemplates[name] = {
 						m_pending: getPendingTemplate(child),
+						m_scoped: child.getAttribute('@scoped'),
 						m_placeholderKey: child[subTemplatePlaceholderKey]
 					};
 					child.remove();
@@ -490,17 +491,26 @@ let Matsui = (() => {
 			if (templateNode.nodeType == 3) {
 				walkTextNode(templateNode, nodePath);
 			} else if (templateNode.nodeType === 1) {
-				if (isTemplate(templateNode)) { // render template in-place
+				if (isTemplate(templateNode) && nodePath.length) { // render template in-place (if it's not the top-level element)
 					let subMapKey = templateNode[subTemplatePlaceholderKey];
 					let pendingTemplate = getPendingTemplate(templateNode);
 					setupTemplateSet.push((templateSet, placeholderMap) => {
-						let subPlaceholderMap = {};
-						if (subMapKey) {
-							placeholderMap[subMapKey](subPlaceholderMap);
+						let inPlaceTemplate;
+						if (templateNode.getAttribute("@scoped")) {
+							inPlaceTemplate = scoped(data => {
+								let subPlaceholderMap = {};
+								placeholderMap[subMapKey](subPlaceholderMap, data);
+								return pendingTemplate(templateSet, subPlaceholderMap);
+							});
 						} else {
-							subPlaceholderMap = placeholderMap;
+							let subPlaceholderMap = {};
+							if (subMapKey) { // TODO: do we need to check this?  Seems like paranoia
+								placeholderMap[subMapKey](subPlaceholderMap);
+							} else {
+								subPlaceholderMap = placeholderMap;
+							}
+							inPlaceTemplate = pendingTemplate(templateSet, subPlaceholderMap);
 						}
-						let inPlaceTemplate = pendingTemplate(templateSet, subPlaceholderMap);
 						return {
 							m_nodePath: nodePath,
 							m_fn: (node, updates, innerTemplate) => {
@@ -511,6 +521,7 @@ let Matsui = (() => {
 						};
 					});
 					templateNode.replaceWith(makePlaceholderNode());
+					return;
 				} else {
 					for (let attr of templateNode.attributes) {
 						walkAttribute(attr, nodePath);
@@ -527,7 +538,9 @@ let Matsui = (() => {
 		for (let attr of definitionElement.attributes || []) {
 			if (attr.name[0] == '@') {
 				let attrKey = getAttrKey(attr.name);
-				templateTransforms[attrKey] = attributeValueToDataFn(attr.value);
+				if (attrKey != 'scoped') {
+					templateTransforms[attrKey] = attributeValueToDataFn(attr.value);
+				}
 			}
 		}
 
@@ -536,14 +549,24 @@ let Matsui = (() => {
 				templateSet = templateSet.extend();
 				for (let name in namedChildTemplates) {
 					let obj = namedChildTemplates[name];
-					let subPlaceholderMap = {}, subMapKey = obj.m_placeholderKey;
-					if (subMapKey) {
-						placeholderMap[subMapKey](subPlaceholderMap);
+					let subMapKey = obj.m_placeholderKey;
+					if (obj.m_scoped) {
+						let template = scoped(data => { // only generate subPlaceholderMap when we have the scoped data
+							let subPlaceholderMap = {};
+							placeholderMap[subMapKey](subPlaceholderMap, data);
+							return obj.m_pending(templateSet, subPlaceholderMap);
+						});
+						templateSet.add(name, template);
 					} else {
-						subPlaceholderMap = placeholderMap;
+						let subPlaceholderMap = {};
+						if (subMapKey) {
+							placeholderMap[subMapKey](subPlaceholderMap);
+						} else {
+							subPlaceholderMap = placeholderMap;
+						}
+						let template = obj.m_pending(templateSet, subPlaceholderMap);
+						templateSet.add(name, template);
 					}
-					let template = obj.m_pending(templateSet, subPlaceholderMap);
-					templateSet.add(name, template);
 				}
 			}
 		
@@ -708,7 +731,9 @@ let Matsui = (() => {
 							let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
 							node[subTemplatePlaceholderKey] = placeholder;
 							// sub-templates have their own placeholder-filling function
-							codeParts.push(`;${objArg}[${JSON.stringify(placeholder)}]=${objArg}=>{`);
+							let scopedVar = node.getAttribute('@scoped');
+							let args = (scopedVar ? `(${objArg},${scopedVar})` : objArg);
+							codeParts.push(`;${objArg}[${JSON.stringify(placeholder)}]=${args}=>{`);
 							walk(node.content || node, true);
 							codeParts.push('};');
 							return;
@@ -726,13 +751,23 @@ let Matsui = (() => {
 				let content = element.content || element;
 				walk(content, true);
 
+				let scopedVar = element.getAttribute("@scoped");
+				let functionArgs = scopedVar ? `${objArg},${scopedVar}` : objArg;
 				let functionBody = codeParts.join('\n');
-				let fillPlaceholderMap = functionBody ? new Function(objArg, functionBody) : (x => x);
+				let fillPlaceholderMap = functionBody ? new Function(functionArgs, functionBody) : (x => x);
 				let pendingTemplate = getPendingTemplate(element);
 				element[elementTemplateCache] = templateSet => {
-					let map = {};
-					fillPlaceholderMap(map);
-					return pendingTemplate(templateSet, map);
+					if (scopedVar) {
+						return scoped(data => {
+							let map = {};
+							fillPlaceholderMap(map, data);
+							return pendingTemplate(templateSet, map);
+						});
+					} else {
+						let map = {};
+						fillPlaceholderMap(map);
+						return pendingTemplate(templateSet, map);
+					}
 				};
 			}
 			return element[elementTemplateCache](this);
