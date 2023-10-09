@@ -179,7 +179,7 @@ let Matsui = (() => {
 
 	/*--- Access-tracking ---*/
 	
-	let pierceKey = Symbol();
+	let pierceKey = Symbol(), silentPierceKey = Symbol();
 	let accessedKey = Symbol("accessed");
 	let access = {
 		tracked(data, trackerObj) {
@@ -192,7 +192,9 @@ let Matsui = (() => {
 				get(obj, prop) {
 					let value = obj[prop];
 					if (prop == rawKey) return obj;
-					if (prop == pierceKey) {
+					if (prop == silentPierceKey) {
+						return data;
+					} else if (prop == pierceKey) {
 						trackerObj[accessedKey] = accessedKey;
 						return data;
 					} else if (isArray && prop === 'length') {
@@ -213,8 +215,8 @@ let Matsui = (() => {
 			});
 			return proxy;
 		},
-		pierce(tracked) {
-			return (tracked && tracked[pierceKey]) || tracked;
+		pierce(tracked, silent) {
+			return (tracked && tracked[silent ? silentPierceKey : pierceKey]) || tracked;
 		},
 		accessed: accessedKey
 	};
@@ -649,6 +651,9 @@ let Matsui = (() => {
 				this.add(name, template, filter);
 			};
 		}
+		addScoped(name, scopedTemplate, filter) {
+			this.add(name, scoped(scopedTemplate), filter);
+		}
 
 		getNamed(name) {
 			if (this.#map[name]) return this.#map[name];
@@ -721,11 +726,8 @@ let Matsui = (() => {
 				let content = element.content || element;
 				walk(content, true);
 
-				let fillPlaceholderMap = (_ => _);
-				if (codeParts.length) {
-					console.log(codeParts.join('\n'));
-					fillPlaceholderMap = new Function(objArg, codeParts.join('\n'));
-				}
+				let functionBody = codeParts.join('\n');
+				let fillPlaceholderMap = functionBody ? new Function(objArg, functionBody) : (x => x);
 				let pendingTemplate = getPendingTemplate(element);
 				element[elementTemplateCache] = templateSet => {
 					let map = {};
@@ -903,8 +905,7 @@ let Matsui = (() => {
 				node: clearable.m_node,
 				updates: [
 					data => {
-						// piercing the data only re-triggers when the object (or plain value) is replaced
-						let untracked = merge.withoutHidden(access.pierce(data));
+						let untracked = merge.withoutHidden(access.pierce(data, true));
 						let template = untrackedDataToTemplate(untracked);
 						let binding = template(innerTemplate);
 						clearable.m_replace(binding.node);
@@ -983,7 +984,7 @@ let Matsui = (() => {
 			if (!template) template = templateSet.fromElement(host);
 
 			let bindingInfo = template(templateSet.dynamic);
-			this.addUpdates(bindingInfo.updates);
+			this.addUpdates(bindingInfo.updates, true); // watch for .setData() and .merge() as well
 			
 			let node = bindingInfo.node;
 			if (replace) {
@@ -1013,7 +1014,7 @@ let Matsui = (() => {
 		scoped: scoped,
 
 		Wrapped: Wrapped,
-		wrap: data => new Wrapped(data),
+		wrap: (data, synchronous) => new Wrapped(data, synchronous),
 		addTo: (element, data, template) => {
 			return api.wrap(data).addTo(element, template);
 		},
