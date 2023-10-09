@@ -181,13 +181,6 @@
 		</script>
 		<template @if="${d => Array.isArray(d.input)}" @scoped="data">
 			<script>
-				// templateFromElementPlaceholders() should not need the placeholder map immediately, but return a function that accepts it
-				// That function can be cached, and then we call it with an object that (from tagged) is assembled as you go, or (from element) returned by a function made from concatenating all `<script>`s and then a big `return {'placeholder':...}
-				// (If no <script>s or @scoped are included, then we shouldn't need dynamically-executed stuff)
-				
-				// @scoped then becomes a special-case for <template>, since it affects the `scope`
-				
-				// Alternatively, some templates can accept a second 'context' argument, which should only be passed in if the caller has specific knowledge of what it should be.  The `innerTemplate` should *never* be called with this argument.
 				function setActiveFile(index) {
 					data.activeFileIndex = index;
 				}

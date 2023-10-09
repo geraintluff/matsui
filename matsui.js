@@ -377,7 +377,7 @@ let Matsui = (() => {
 	}
 	function defaultAttributeFunction(node, attrKey, handler) {
 		if (('on' + attrKey) in node) {
-			node.addEventListener(attrKey, handler);
+			node.addEventListener(attrKey, e => handler(e, node));
 		} else if (attrKey in node) {
 			return d => {
 				node[attrKey] = handler();
@@ -469,7 +469,7 @@ let Matsui = (() => {
 					m_nodePath: nodePath,
 					m_fn: (node, updates, innerTemplate) => {
 						let latestData = null;
-						let valueFn = () => dataFn(latestData);
+						let valueFn = (...args) => dataFn(latestData, ...args);
 
 						let maybeUpdate;
 						if (attrKey in templateSet.attributes) {
@@ -734,6 +734,11 @@ let Matsui = (() => {
 							let scopedVar = node.getAttribute('@scoped');
 							let args = (scopedVar ? `(${objArg},${scopedVar})` : objArg);
 							codeParts.push(`;${objArg}[${JSON.stringify(placeholder)}]=${args}=>{`);
+							for (let attr of node.attributes) {
+								if (attr.name[0] == '$' || attr.name[0] == '@') {
+									attr.value = replaceExprs(attr.value, foundExpr);
+								}
+							}
 							walk(node.content || node, true);
 							codeParts.push('};');
 							return;
@@ -916,8 +921,8 @@ let Matsui = (() => {
 						} else {
 							let binding = conditionalTemplate(innerTemplate);
 							conditionalUpdates = combineUpdates(binding.updates);
-							conditionalUpdates(data);
 							clearable.m_replace(binding.node);
+							conditionalUpdates(data);
 						}
 					} else {
 						if (conditionalUpdates) {
@@ -951,7 +956,6 @@ let Matsui = (() => {
 			};
 		};
 	}
-	globalSet.transforms.scoped = t => {throw Error('not implemented: @scoped')};
 
 	/* Top-level stuff  */
 
