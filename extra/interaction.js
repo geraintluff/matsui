@@ -156,14 +156,16 @@
 			return files.length && files;
 		}
 		
+		let currentDragTarget = null;
 		node.addEventListener('dragenter', e => {
+			currentDragTarget = e.target;
 			if (getFiles(e)) {
 				node.classList.add("interaction-drop");
 			}
 		});
 		node.addEventListener('dragleave', e => {
-			console.log(e.target);
-			if (e.target === node && getFiles(e)) {
+			// the drag enters a new element before leaving the previous one
+			if (e.target === currentDragTarget) {
 				node.classList.remove("interaction-drop");
 			}
 		});

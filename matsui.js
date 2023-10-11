@@ -349,12 +349,17 @@ let Matsui = (() => {
 		
 		return placeholderMap => {
 			let fullParts = parts.map(p => {
-				if (typeof p == 'function') return p(placeholderMap);
+				if (typeof p == 'function') {
+					return p(placeholderMap);
+				}
 				return p;
 			}).filter(x => (x != ''));
 			if (fullParts.length == 1) {
 				// Attribute is just a single value, so return it without casting to string
 				return fullParts[0];
+			} else if (!fullParts.some(p => (typeof p === 'function'))) {
+				// Attribute is all fixed values, so return as a fixed string
+				return fullParts.join("");
 			} else {
 				return data => {
 					return fullParts.map(p => {
