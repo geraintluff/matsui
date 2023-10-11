@@ -289,12 +289,13 @@ let Matsui = (() => {
 	}
 	
 	let exprStartRegex = /\$\{/g;
-	function replaceExprs(text, foundExpr) {
+	function replaceExprs(text, foundExpr, foundText) {
+		if (!foundText) foundText = (x => x);
 		let prevEnd = 0;
 		let match, result = [];
 		// Find end of expression by balanced bracket/quote matching
 		while ((match = exprStartRegex.exec(text))) {
-			result.push(text.substr(prevEnd, match.index - prevEnd)); // prefix/joiner
+			result.push(foundText(text.substr(prevEnd, match.index - prevEnd))); // prefix/joiner
 			let stack = ['}'];
 			let startExpr = match.index + 2, endExpr = startExpr;
 			while (endExpr < text.length && stack.length) {
@@ -328,7 +329,7 @@ let Matsui = (() => {
 			exprStartRegex.lastIndex = endExpr;
 			prevEnd = endExpr;
 		}
-		result.push(text.substr(prevEnd));
+		result.push(foundText(text.substr(prevEnd)));
 		return result.join("");
 	}
 	function attributeValueToDataFn(value) {
@@ -713,17 +714,29 @@ let Matsui = (() => {
 				let placeholderIndex = 0;
 				let objArg = '__matsui_template_map';
 				let codeParts = [];
+				let htmlPrefix = '';
+				function addEscaped(text) {
+					htmlPrefix += text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+					return text;
+				}
+				function addCode(code) {
+					if (htmlPrefix) {
+						codeParts.push(htmlPrefix.replace(/\*\//g, '* /').replace(/([\S]([\s\S]*[\S])?)/, '/*$1*/'));
+						htmlPrefix = '';
+					}
+					codeParts.push(code);
+				}
 
 				function walk(node, ignoreTemplate) {
 					function foundExpr(expr) {
 						let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
-						codeParts.push(`;${objArg}[${JSON.stringify(placeholder)}]=(${expr});`);
+						addCode(`;${objArg}[${JSON.stringify(placeholder)}]=(${expr});`);
 						return placeholder;
 					}
 
 					if (node.nodeType === 3) {
 						let startIndex = placeholderIndex;
-						let replacement = replaceExprs(node.nodeValue, foundExpr);
+						let replacement = replaceExprs(node.nodeValue, foundExpr, addEscaped);
 						if (placeholderIndex > startIndex) { // if we found any expressions, the index increments
 							node.nodeValue = replacement;
 						}
@@ -731,41 +744,63 @@ let Matsui = (() => {
 						if (node.tagName == 'SCRIPT') {
 							if (node.getRootNode().nodeType == 11) { // document fragment (which means it's not part of the main document)
 								node.replaceWith(makePlaceholderNode());
-								return codeParts.push(node.textContent);
+								return addCode(node.textContent);
 							}
 						}
+						htmlPrefix += `<${node.tagName}`;
 						if (isTemplate(node) && !ignoreTemplate) {
 							let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
 							node[subTemplatePlaceholderKey] = placeholder;
 							// sub-templates have their own placeholder-filling function
 							let scopedVar = node.getAttribute('@scoped');
 							let args = (scopedVar ? `(${objArg},${scopedVar})` : objArg);
-							codeParts.push(`;${objArg}[${JSON.stringify(placeholder)}]=${args}=>{`);
+
+							addCode(`;${objArg}[${JSON.stringify(placeholder)}]=${args}=>{`);
 							for (let attr of node.attributes) {
+								htmlPrefix += ` ${attr.name}="`;
 								if (attr.name[0] == '$' || attr.name[0] == '@') {
-									attr.value = replaceExprs(attr.value, foundExpr);
+									attr.value = replaceExprs(attr.value, foundExpr, addEscaped);
+								} else {
+									addEscaped(attr.value);
 								}
+								htmlPrefix += `"`;
 							}
+							htmlPrefix += '>';
+
 							walk(node.content || node, true);
-							codeParts.push('};');
+							addCode('};');
+
+							htmlPrefix += '</TEMPLATE>';
 							return;
 						}
 						for (let attr of node.attributes) {
+							htmlPrefix += ` ${attr.name}="`;
 							if (attr.name[0] == '$') {
-								attr.value = replaceExprs(attr.value, foundExpr);
+								attr.value = replaceExprs(attr.value, foundExpr, addEscaped);
+							} else {
+								addEscaped(attr.value);
 							}
+							htmlPrefix += `"`;
 						}
-					}
-					if (node.childNodes) {
-						node.childNodes.forEach(c => walk(c));
+						htmlPrefix += '>';
+						if (node.childNodes) {
+							node.childNodes.forEach(c => walk(c));
+						}
+						htmlPrefix += `</${node.tagName}>`;
+					} else {
+						if (node.childNodes) {
+							node.childNodes.forEach(c => walk(c));
+						}
 					}
 				}
 				let content = element.content || element;
 				walk(content, true);
+				addCode("");
 
 				let scopedVar = element.getAttribute("@scoped");
 				let functionArgs = scopedVar ? `${objArg},${scopedVar}` : objArg;
-				let functionBody = codeParts.join('\n');
+				let functionBody = codeParts.join('');
+				if (functionBody) console.log(functionBody);
 				let fillPlaceholderMap = functionBody ? new Function(functionArgs, functionBody) : (x => x);
 				let pendingTemplate = getPendingTemplate(element);
 				element[elementTemplateCache] = templateSet => {
