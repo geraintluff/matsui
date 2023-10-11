@@ -4,6 +4,9 @@
 		<title>Uglify</title>
 		<meta charset="utf8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
+
+		<script src="prism/prism.js"></script>
+		<link href="prism/prism.css" rel="stylesheet">
 		<style>
 			body {
 				margin: 0;
@@ -39,7 +42,7 @@
 						"files input input input input"
 						"files minify options result live"
 						"files output output output output";
-					grid-template-columns: max-content 1fr 1fr 1fr 1fr;
+					grid-template-columns: max-content 1fr 1fr 1.5fr 0.5fr;
 					grid-template-rows: 1fr 2em 1fr;
 				}
 			}
@@ -108,7 +111,7 @@
 				display: flex;
 				align-items: center;
 				justify-content: center;
-				/*white-space: nowrap;*/
+				white-space: nowrap;
 			}
 			#output {
 				grid-area: output;
@@ -118,8 +121,9 @@
 				margin: 0;
 				border-top: 2px solid #444;
 			}
-			#output code {
+			#input, #output, #output code {
 				white-space: pre-wrap;
+				line-height: 1.3;
 			}
 			#live {
 				grid-area: live;
@@ -219,17 +223,26 @@
 		<button id="minify-button" $click="${uglifyUpdate}">minify</button>
 		<button id="options-button" $click="${d => d.optionsDialog = true}">options</button>
 		<div id="result-size">${d =>
-			(Array.isArray(d.input) ? d.input.map(f => f.code).join('') : d.input).length} → ${d => {
+			(Array.isArray(d.input) ? d.input.map(f => f.code).join('') : d.input).length} → <a
+				target="_blank" $update="${(d, node) => {
+					if (node.href) URL.revokeObjectURL(node.href);
+					if (d.output.code) {
+						throw Error('DEBUG');
+						let blob = new Blob([d.output.code], {type: 'text/javascript'});
+						node.href = URL.createObjectURL(blob);
+					} else {
+						node.removeAttribute('href');
+					}
+				}}">${d => {
 				if (d.working) return "working...";
 				if (d.output.error) return 'Error';
-				return d.output.code.length + ' bytes';
-			}}</div>
+				if (d.output.code) return d.output.code.length + ' bytes';
+				return '?';
+			}}</a></div>
 		<label id="live">
 			<input type="checkbox" $input-keypath="live">
 			live
 		</label>
-		<script src="prism/prism.js"></script>
-		<link href="prism/prism.css" rel="stylesheet">
 		<pre id="output" class="language-javascript"><code $update="${(d, node) => {
 			let text = (d.output.error ? JSON.stringify(d.output.error) : d.output.code);
 			node.textContent = text;
