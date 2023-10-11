@@ -181,8 +181,9 @@
 		</script>
 		<template @if="${d => Array.isArray(d.input)}" @scoped="data">
 			<script>
-				function setActiveFile(index) {
-					data.activeFileIndex = index;
+				function setActiveFile(file) {
+					data.input.forEach(f => f.selected = false);
+					file.selected = true;
 				}
 				function removeFile(index) {
 					data.inputs.splice(index, 1);
@@ -191,12 +192,8 @@
 			<div id="file-column">
 				<div id="file-list">
 					<template @foreach="{input}">
-						<button class="tab-left"
-							$click="${(d, e, node) => {
-								document.querySelector('#input').value = d.code;
-								node.parentNode.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
-								node.classList.add('selected');
-							}}"
+						<button $class="tab-left ${d => d.selected ? 'selected' : ''}"
+							$click="${setActiveFile}"
 							>${d => d.name}</button>
 					</template>
 				</div>
@@ -205,7 +202,7 @@
 					.join('\n\n')
 				}">clear</button>
 			</div>
-			<textarea id="input" readonly></textarea>
+			<textarea id="input" readonly $value="${d => (d.input.filter(file => file.selected)[0] || {code:''}).code}"></textarea>
 		</template>
 		<template @if="${d => !Array.isArray(d.input)}">
 			<textarea id="input" placeholder="JS code" autofocus
@@ -235,8 +232,8 @@
 		<script src="uglify.min.js"></script>
 		<script src="../matsui.js"></script>
 		<script src="../extra/sync.js"></script>
-		<script src="../extra/log-dom.js"></script>
 		<script src="../extra/interaction.js"></script>
+<!--		<script src="../extra/log-dom.js"></script>-->
 		<script>
 			let notBefore = 0;
 			let runTimeout = null;

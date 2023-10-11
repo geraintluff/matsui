@@ -55,7 +55,7 @@ let Matsui = (() => {
 					} else {
 						value[key] = merge.apply(value[key], childMerge, keepNulls);
 					}
-				} else if (childMerge != null) { // deliberately matching both null/undefined
+				} else if (childMerge != null || keepNulls) { // deliberately matching both null/undefined
 					value[key] = childMerge;
 				}
 			});
@@ -352,7 +352,7 @@ let Matsui = (() => {
 				if (typeof p == 'function') return p(placeholderMap);
 				return p;
 			}).filter(x => (x != ''));
-			if (fullParts.length == 1 && typeof fullParts[0] == 'function') {
+			if (fullParts.length == 1) {
 				// Attribute is just a single value, so return it without casting to string
 				return fullParts[0];
 			} else {
@@ -464,7 +464,8 @@ let Matsui = (() => {
 			let getDataFn = attributeValueToDataFn(attr.value);
 
 			setupTemplateSet.push((templateSet, placeholderMap) => {
-				let dataFn = getDataFn(placeholderMap);
+				let data = getDataFn(placeholderMap);
+				let dataFn = (typeof data === 'function') ? data : (_ => data);
 				return {
 					m_nodePath: nodePath,
 					m_fn: (node, updates, innerTemplate) => {
@@ -707,6 +708,7 @@ let Matsui = (() => {
 				let placeholderIndex = 0;
 				let objArg = '__matsui_template_map';
 				let codeParts = [];
+
 				function walk(node, ignoreTemplate) {
 					function foundExpr(expr) {
 						let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
