@@ -335,15 +335,15 @@ let Matsui = (() => {
 		let parts = value.split(exprRegex);
 		for (let i = 1; i < parts.length; i += 2) {
 			let plainOrPlaceholder = parts[i];
+			let key = plainOrPlaceholder.substr(1, plainOrPlaceholder.length - 2);
 			if (plainOrPlaceholder[0] == '{') {
-				let key = plainOrPlaceholder.substr(1, plainOrPlaceholder.length - 2);
 				if (key == '=') {
 					parts[i] = (pMap => d => d);
 				} else {
 					parts[i] = (pMap => d => d[key]);
 				}
 			} else {
-				parts[i] = (pMap => pMap[plainOrPlaceholder]);
+				parts[i] = (pMap => pMap[key]);
 			}
 		}
 		
@@ -397,7 +397,7 @@ let Matsui = (() => {
 	// Arbitrarily-picked vendor-reserved Unicode points
 	let placeholderPrefix = '\uF74A', placeholderSuffix = '\uF74B';
 	let exprRegex = /(\{[a-z0-9_=-]+\}|\uF74A[0-9]+\uF74B)/uig;
-	let taggedExprRegex = /((\$[a-z0-9_-]+)*)(\{([a-z0-9_=-]+)\}|\uF74A[0-9]+\uF74B)/uig;
+	let taggedExprRegex = /((\$[a-z0-9_-]+)*)(\{([a-z0-9_=-]+)\}|\uF74A([0-9]+)\uF74B)/uig;
 	let subTemplatePlaceholderKey = Symbol();
 	function getPendingTemplate(definitionElement) {
 		let cloneable = definitionElement.content || definitionElement;
@@ -429,10 +429,10 @@ let Matsui = (() => {
 				
 				let ids = match[1].split('$').slice(1); // $...$... section
 				
-				let plainOrPlaceholder = match[3], key = match[4];
-				let fixedValue = key && (key == '=' ? (d => d) : (d => d ? d[key]: null));
+				let plainKey = match[4], placeholderKey = match[5];
+				let fixedValue = plainKey && (plainKey == '=' ? (d => d) : (d => d ? d[plainKey]: null));
 				setupTemplateSet.push((templateSet, placeholderMap) => {
-					let value = fixedValue || placeholderMap[plainOrPlaceholder];
+					let value = fixedValue || placeholderMap[placeholderKey];
 					return {
 						m_nodePath: nodePath,
 						m_fn: (node, updates, innerTemplate) => {
@@ -711,7 +711,7 @@ let Matsui = (() => {
 			if (!element[elementTemplateCache]) {
 				// Concatenates ${...} and <script>s into JS code which fills out a placeholder object
 				let placeholderIndex = 0;
-				let objArg = '__matsui_template_map';
+				let objArg = '__matsui_template';
 				let codeParts = [];
 				let htmlPrefix = ''; // Collects HTML and includes it as a comment before code sections, to help debugging
 				let addEscaped = text => {
@@ -725,9 +725,8 @@ let Matsui = (() => {
 
 				function walk(node, ignoreTemplate) {
 					function foundExpr(expr) {
-						let placeholder = placeholderPrefix + (placeholderIndex++) + placeholderSuffix;
-						addCode(`${objArg}["${placeholder}"]=(${expr});`);
-						return placeholder;
+						addCode(`${objArg}[${++placeholderIndex}]=(${expr});`);
+						return placeholderPrefix + placeholderIndex + placeholderSuffix;
 					}
 
 					if (node.nodeType === 3) {
@@ -758,13 +757,13 @@ let Matsui = (() => {
 							htmlPrefix += '>';
 						};
 						if (isTemplate(node) && !ignoreTemplate) {
-							let placeholder = placeholderPrefix + (placeholderIndex++) + placeholderSuffix;
-							node[subTemplatePlaceholderKey] = placeholder;
+							let placeholderKey = ++placeholderIndex + "";
+							node[subTemplatePlaceholderKey] = placeholderKey;
 							// sub-templates have their own placeholder-filling function
 							let scopedVar = node.getAttribute('@scoped');
 							let args = (scopedVar ? `(${objArg},${scopedVar})` : objArg);
 
-							addCode(`${objArg}["${placeholder}"]=${args}=>{`);
+							addCode(`${objArg}[${placeholderKey}]=${args}=>{`);
 							processAttributes();
 
 							walk(node.content || node, true);
@@ -825,8 +824,7 @@ let Matsui = (() => {
 			// fill with a map from the current values
 			let placeholderMap = {};
 			for (let i = 0; i < values.length; ++i) {
-				let placeholder = placeholderPrefix + i + placeholderSuffix;
-				placeholderMap[placeholder] = values[i];
+				placeholderMap[i] = values[i];
 			}
 
 			return cached(this, placeholderMap);
