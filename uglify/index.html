@@ -226,15 +226,14 @@
 			(Array.isArray(d.input) ? d.input.map(f => f.code).join('') : d.input).length} → <a
 				target="_blank" $update="${(d, node) => {
 					if (node.href) URL.revokeObjectURL(node.href);
-					if (d.output.code) {
-						throw Error('DEBUG');
+					if (d.output.code && !d.working) {
 						let blob = new Blob([d.output.code], {type: 'text/javascript'});
 						node.href = URL.createObjectURL(blob);
 					} else {
 						node.removeAttribute('href');
 					}
 				}}">${d => {
-				if (d.working) return "working...";
+				if (d.working) return "...";
 				if (d.output.error) return 'Error';
 				if (d.output.code) return d.output.code.length + ' bytes';
 				return '?';
@@ -340,7 +339,15 @@
 			
 			// Live updates, if enabled
 			wrapped.addUpdates(data => {
-				if (data.live) uglifyUpdate(data);
+				if (data.live) {
+					uglifyUpdate(data);
+				} else {
+					Matsui.access.pierce(data.input); // so it knows we're interested in changes there
+					let inputMerge = Matsui.merge.getHidden(data).input;
+					if (inputMerge) {
+						data.working = true;
+					}
+				}
 			});
 			
 			wrapped.syncHash(data => ({

@@ -290,7 +290,6 @@ let Matsui = (() => {
 	
 	let exprStartRegex = /\$\{/g;
 	function replaceExprs(text, foundExpr, foundText) {
-		if (!foundText) foundText = (x => x);
 		let prevEnd = 0;
 		let match, result = [];
 		// Find end of expression by balanced bracket/quote matching
@@ -714,23 +713,20 @@ let Matsui = (() => {
 				let placeholderIndex = 0;
 				let objArg = '__matsui_template_map';
 				let codeParts = [];
-				let htmlPrefix = '';
-				function addEscaped(text) {
+				let htmlPrefix = ''; // Collects HTML and includes it as a comment before code sections, to help debugging
+				let addEscaped = text => {
 					htmlPrefix += text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 					return text;
-				}
-				function addCode(code) {
-					if (htmlPrefix) {
-						codeParts.push(htmlPrefix.replace(/\*\//g, '* /').replace(/([\S]([\s\S]*[\S])?)/, '/*$1*/'));
-						htmlPrefix = '';
-					}
-					codeParts.push(code);
-				}
+				};
+				let addCode = code => {
+					codeParts.push(htmlPrefix.replace(/\*\//g, '* /').replace(/([\S]([\s\S]*[\S])?)/, '/*$1*/') + code);
+					htmlPrefix = '';
+				};
 
 				function walk(node, ignoreTemplate) {
 					function foundExpr(expr) {
-						let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
-						addCode(`;${objArg}[${JSON.stringify(placeholder)}]=(${expr});`);
+						let placeholder = placeholderPrefix + (placeholderIndex++) + placeholderSuffix;
+						addCode(`${objArg}["${placeholder}"]=(${expr});`);
 						return placeholder;
 					}
 
@@ -741,21 +737,15 @@ let Matsui = (() => {
 							node.nodeValue = replacement;
 						}
 					} else if (node.nodeType === 1) {
-						if (node.tagName == 'SCRIPT') {
+						let tagName = node.tagName;
+						if (tagName == 'SCRIPT') {
 							if (node.getRootNode().nodeType == 11) { // document fragment (which means it's not part of the main document)
 								node.replaceWith(makePlaceholderNode());
 								return addCode(node.textContent);
 							}
 						}
-						htmlPrefix += `<${node.tagName}`;
-						if (isTemplate(node) && !ignoreTemplate) {
-							let placeholder = placeholderPrefix + (++placeholderIndex) + placeholderSuffix;
-							node[subTemplatePlaceholderKey] = placeholder;
-							// sub-templates have their own placeholder-filling function
-							let scopedVar = node.getAttribute('@scoped');
-							let args = (scopedVar ? `(${objArg},${scopedVar})` : objArg);
-
-							addCode(`;${objArg}[${JSON.stringify(placeholder)}]=${args}=>{`);
+						htmlPrefix += `<${tagName}`;
+						let processAttributes = _ => {
 							for (let attr of node.attributes) {
 								htmlPrefix += ` ${attr.name}="`;
 								if (attr.name[0] == '$' || attr.name[0] == '@') {
@@ -766,31 +756,26 @@ let Matsui = (() => {
 								htmlPrefix += `"`;
 							}
 							htmlPrefix += '>';
+						};
+						if (isTemplate(node) && !ignoreTemplate) {
+							let placeholder = placeholderPrefix + (placeholderIndex++) + placeholderSuffix;
+							node[subTemplatePlaceholderKey] = placeholder;
+							// sub-templates have their own placeholder-filling function
+							let scopedVar = node.getAttribute('@scoped');
+							let args = (scopedVar ? `(${objArg},${scopedVar})` : objArg);
+
+							addCode(`${objArg}["${placeholder}"]=${args}=>{`);
+							processAttributes();
 
 							walk(node.content || node, true);
 							addCode('};');
-
-							htmlPrefix += '</TEMPLATE>';
-							return;
-						}
-						for (let attr of node.attributes) {
-							htmlPrefix += ` ${attr.name}="`;
-							if (attr.name[0] == '$') {
-								attr.value = replaceExprs(attr.value, foundExpr, addEscaped);
-							} else {
-								addEscaped(attr.value);
-							}
-							htmlPrefix += `"`;
-						}
-						htmlPrefix += '>';
-						if (node.childNodes) {
+						} else {
+							processAttributes();
 							node.childNodes.forEach(c => walk(c));
 						}
-						htmlPrefix += `</${node.tagName}>`;
-					} else {
-						if (node.childNodes) {
-							node.childNodes.forEach(c => walk(c));
-						}
+						htmlPrefix += `</${tagName}>`;
+					} else if (node.childNodes) { // document fragments etc.
+						node.childNodes.forEach(c => walk(c));
 					}
 				}
 				let content = element.content || element;
