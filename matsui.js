@@ -289,12 +289,12 @@ let Matsui = (() => {
 	}
 	
 	let exprStartRegex = /\$\{/g;
-	function replaceExprs(text, foundExpr, foundText) {
+	function replaceExprs(text, foundExpr) {
 		let prevEnd = 0;
 		let match, result = [];
 		// Find end of expression by balanced bracket/quote matching
 		while ((match = exprStartRegex.exec(text))) {
-			result.push(foundText(text.substr(prevEnd, match.index - prevEnd))); // prefix/joiner
+			result.push(text.substr(prevEnd, match.index - prevEnd)); // prefix/joiner
 			let stack = ['}'];
 			let startExpr = match.index + 2, endExpr = startExpr;
 			while (endExpr < text.length && stack.length) {
@@ -328,7 +328,7 @@ let Matsui = (() => {
 			exprStartRegex.lastIndex = endExpr;
 			prevEnd = endExpr;
 		}
-		result.push(foundText(text.substr(prevEnd)));
+		result.push(text.substr(prevEnd));
 		return result.join("");
 	}
 	function attributeValueToDataFn(value) {
@@ -604,6 +604,8 @@ let Matsui = (() => {
 
 	let elementTemplateCache = Symbol();
 	let tagCache = new WeakMap();
+	let codeAssemblyRegex = /\uF74A!?[0-9]+\uF74B/ug;
+	let regexMarkedForRemoval = /^\uF74A![0-9]+\uF74B$/ug;
 	class TemplateSet {
 		attributes = {};
 		transforms = {};
@@ -711,27 +713,22 @@ let Matsui = (() => {
 			if (!element[elementTemplateCache]) {
 				// Concatenates ${...} and <script>s into JS code which fills out a placeholder object
 				let placeholderIndex = 0;
+				let nextPlaceholder = markForRemoval => {
+					return placeholderPrefix + (markForRemoval ? '!' : '') + (++placeholderIndex) + placeholderSuffix;
+				};
 				let objArg = '__matsui_template';
-				let codeParts = [];
-				let htmlPrefix = ''; // Collects HTML and includes it as a comment before code sections, to help debugging
-				let addEscaped = text => {
-					htmlPrefix += text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-					return text;
-				};
-				let addCode = code => {
-					codeParts.push(htmlPrefix.replace(/\*\//g, '* /').replace(/([\S]([\s\S]*[\S])?)/, '/*$1*/') + code);
-					htmlPrefix = '';
-				};
+				let codeParts = {};
 
 				function walk(node, ignoreTemplate) {
 					function foundExpr(expr) {
-						addCode(`${objArg}[${++placeholderIndex}]=(${expr});`);
-						return placeholderPrefix + placeholderIndex + placeholderSuffix;
+						let placeholder = nextPlaceholder();
+						codeParts[placeholder] = `${objArg}[${placeholderIndex}]=(${expr});`;
+						return placeholder;
 					}
 
 					if (node.nodeType === 3) {
 						let startIndex = placeholderIndex;
-						let replacement = replaceExprs(node.nodeValue, foundExpr, addEscaped);
+						let replacement = replaceExprs(node.nodeValue, foundExpr);
 						if (placeholderIndex > startIndex) { // if we found any expressions, the index increments
 							node.nodeValue = replacement;
 						}
@@ -739,53 +736,79 @@ let Matsui = (() => {
 						let tagName = node.tagName;
 						if (tagName == 'SCRIPT') {
 							if (node.getRootNode().nodeType == 11) { // document fragment (which means it's not part of the main document)
-								node.replaceWith(makePlaceholderNode());
-								return addCode(node.textContent);
+								let placeholder = nextPlaceholder(true);
+								codeParts[placeholder] = node.textContent;
+								node.textContent = placeholder;
 							}
 						}
-						htmlPrefix += `<${tagName}`;
 						let processAttributes = _ => {
 							for (let attr of node.attributes) {
-								htmlPrefix += ` ${attr.name}="`;
 								if (attr.name[0] == '$' || attr.name[0] == '@') {
-									attr.value = replaceExprs(attr.value, foundExpr, addEscaped);
-								} else {
-									addEscaped(attr.value);
+									attr.value = replaceExprs(attr.value, foundExpr);
 								}
-								htmlPrefix += `"`;
 							}
-							htmlPrefix += '>';
 						};
 						if (isTemplate(node) && !ignoreTemplate) {
+							let prefixPlaceholder = nextPlaceholder(true);
 							let placeholderKey = ++placeholderIndex + "";
+							let suffixPlaceholder = nextPlaceholder(true);
+
 							node[subTemplatePlaceholderKey] = placeholderKey;
 							// sub-templates have their own placeholder-filling function
+							node.before(document.createTextNode(prefixPlaceholder));
 							let scopedVar = node.getAttribute('@scoped');
 							let args = (scopedVar ? `(${objArg},${scopedVar})` : objArg);
+							codeParts[prefixPlaceholder] = `${objArg}[${placeholderKey}]=${args}=>{`;
 
-							addCode(`${objArg}[${placeholderKey}]=${args}=>{`);
 							processAttributes();
-
 							walk(node.content || node, true);
-							addCode('};');
+
+							node.after(document.createTextNode(suffixPlaceholder));
+							codeParts[suffixPlaceholder] = '};';
 						} else {
 							processAttributes();
-							node.childNodes.forEach(c => walk(c));
+							let child = node.firstChild;
+							while (child) {
+								walk(child);
+								child = child.nextSibling;
+							}
 						}
-						htmlPrefix += `</${tagName}>`;
-					} else if (node.childNodes) { // document fragments etc.
-						node.childNodes.forEach(c => walk(c));
+					} else {
+						let child = node.firstChild;
+						while (child) {
+							walk(child);
+							child = child.nextSibling;
+						}
 					}
 				}
 				let content = element.content || element;
 				walk(content, true);
-				addCode("");
 
 				let scopedVar = element.getAttribute("@scoped");
-				let functionArgs = scopedVar ? `${objArg},${scopedVar}` : objArg;
-				let functionBody = codeParts.join('');
-				if (functionBody) console.log(functionBody);
-				let fillPlaceholderMap = functionBody ? new Function(functionArgs, functionBody) : (x => x);
+				let fillPlaceholderMap = (x => x);
+				if (Object.keys(codeParts).length) {
+					let functionArgs = scopedVar ? `${objArg},${scopedVar}` : objArg;
+					let functionBody = '/*' + element.outerHTML.replace(/\*\//g, '* /')
+						.replace(codeAssemblyRegex, p => `*/${codeParts[p]}/*`) + '*/';
+					fillPlaceholderMap = new Function(functionArgs, functionBody);
+				}
+				if (Object.keys(codeParts).length) console.log(fillPlaceholderMap + "");
+				
+				function removeMarkedNodes(node) {
+					let text = (node.tagName == 'SCRIPT' ? node.textContent : node.nodeValue);
+					if (regexMarkedForRemoval.test(text)) {
+						node.remove();
+					} else {
+						let child = node.firstChild;
+						while (child) {
+							let next = child.nextSibling;
+							removeMarkedNodes(child);
+							child = next;
+						}
+					}
+				}
+				removeMarkedNodes(content);
+				
 				let pendingTemplate = getPendingTemplate(element);
 				element[elementTemplateCache] = templateSet => {
 					if (scopedVar) {
