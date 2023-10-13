@@ -39,7 +39,14 @@ Test("check expression end", (api, pass, fail, assert) => {
 				let fn = new Function('return ' + expr);
 			} catch (e) {
 				console.log(`EXPRESSIONS[${index}] failed to parse: ${e.message}`);
-				return;
+				console.log("Trying strict mode...");
+				expr = `function(){"use strict";${code}}`
+				try {
+					let fn = new Function('return ' + expr);
+				} catch (e) {
+					console.log(`EXPRESSIONS[${index}] failed again: ${e.message}`);
+					return;
+				}
 			}
 			let html = parsedElementHtml(expr);
 			assert(html == reference);

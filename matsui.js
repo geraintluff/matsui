@@ -341,7 +341,15 @@ let Matsui = (() => {
 							while (endExpr < text.length && (text.slice(endExpr - 2, endExpr) != '*/')) endExpr++;
 						} else if (expectingExpr) { // regular expression
 							while (endExpr < text.length && text[endExpr] != '/') {
-								if (text[endExpr] == '\\') ++endExpr;
+								c = text[endExpr];
+								if (c == '[') {
+									while (c && c != ']') {
+										if (c == '\\') ++endExpr;
+										c = text[++endExpr];
+									}
+								}
+
+								if (c == '\\') ++endExpr;
 								++endExpr;
 							}
 							stack.push('/'); // expect the regexp to close immediately
@@ -360,7 +368,7 @@ let Matsui = (() => {
 						let sequence = text.slice(sequenceStart, endExpr);
 						if (/^(delete|typeof|void|in|instanceof|new|throw)$/.test(sequence)) {
 							expectingExpr = true;
-						} else if (/^(if|else|for|while|switch|try|catch|finally|with)$/.test(sequence)) {
+						} else if (/^(if|else|for|while|switch|case|try|catch|finally|with)$/.test(sequence)) {
 							expectingExpr = true;
 							if (stackTop) stack.push("");
 						} else {
@@ -372,7 +380,9 @@ let Matsui = (() => {
 			if (stack.length) {
 				let message = `expected ${stack[0]} @ ${endExpr}`;
 				result.push(message);
-				console.error(`${message}: ${text.slice(0, endExpr + 1)}`);
+				throw Error(`${message}: ${text.slice(0, endExpr + 1)}`);
+			} else {
+				result.push(foundExpr(text.slice(startExpr, endExpr - 1)));
 			}
 			exprStartRegex.lastIndex = endExpr;
 			prevEnd = endExpr;
