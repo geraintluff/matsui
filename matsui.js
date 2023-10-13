@@ -294,48 +294,97 @@ let Matsui = (() => {
 		let match, result = [];
 		// Find end of expression by balanced bracket/quote matching
 		while ((match = exprStartRegex.exec(text))) {
-			result.push(text.substr(prevEnd, match.index - prevEnd)); // prefix/joiner
+			result.push(text.slice(prevEnd, match.index)); // prefix/joiner
 			let stack = ['}'];
 			let startExpr = match.index + 2, endExpr = startExpr;
+			let expectingExpr = false;
 			while (endExpr < text.length && stack.length) {
-				let closeChar = stack[stack.length - 1];
+				let stackTop = stack[stack.length - 1];
+				let closeChar = stackTop || stack[stack.length - 2];
 				let c = text[endExpr++];
 				if (c == '\\') {
 					++endExpr;
 				} else if (c == closeChar) {
 					stack.pop();
+					if (!stackTop) stack.pop();
+					expectingExpr = false;
+					if (!stack[stack.length - 1]) {
+						stack.pop();
+						expectingExpr = true;
+					}
 				} else if (closeChar == '`') {
 					if (c == '$' && text[endExpr + 1] == "{") {
 						stack.push("}");
 						++endExpr;
+						expectingExpr = true;
 					}
+				} else if (/\s/.test(c)) {
+					// do nothing
 				} else if (closeChar != '"' && closeChar != "'") {
 					if (c == '{') {
 						stack.push("}");
+						expectingExpr = true;
 					} else if (c == '"' || c == "'" || c == '`') {
 						stack.push(c);
+					} else if (c == '(') {
+						stack.push(')');
+						expectingExpr = true;
+					} else if (c == '[') {
+						stack.push(']');
+						expectingExpr = true;
+					} else if (c == '/') {
+						let next = text[endExpr];
+						if (next == '/') {
+							while (endExpr < text.length && text[endExpr] != '\n' && text[endExpr] != '\r') endExpr++;
+						} else if (next == '*') {
+							endExpr += 3;
+							while (endExpr < text.length && (text.slice(endExpr - 2, endExpr) != '*/')) endExpr++;
+						} else if (expectingExpr) { // regular expression
+							while (endExpr < text.length && text[endExpr] != '/') {
+								if (text[endExpr] == '\\') ++endExpr;
+								++endExpr;
+							}
+							stack.push('/'); // expect the regexp to close immediately
+						} else { // division
+							expectingExpr = true;
+						}
+					} else if (/[=<>\+\-%\*&\|\^~!\?\:,;]/.test(c)) {
+						expectingExpr = true;
+					} else if (c == '.') {
+						expectingExpr = false;
+					} else { // collect everything until the next familiar token
+						let sequenceStart = endExpr - 1;
+						while (text[endExpr] && !/[\s\/\(\)\[\]\{\}\."'\`=<>\+\-%\*&\|\^~!\?\:,;]/.test(text[endExpr])) {
+							++endExpr;
+						}
+						let sequence = text.slice(sequenceStart, endExpr);
+						if (/^(delete|typeof|void|in|instanceof|new|throw)$/.test(sequence)) {
+							expectingExpr = true;
+						} else if (/^(if|else|for|while|switch|try|catch|finally|with)$/.test(sequence)) {
+							expectingExpr = true;
+							if (stackTop) stack.push("");
+						} else {
+							expectingExpr = false;
+						}
 					}
 				}
 			}
-			if (stack.length) throw Error(`expected ${stack[0]}: ` + text);
-			let expr = text.substr(startExpr, endExpr - startExpr - 1);
-			try { // As well as syntax errors, will fail under CSP, so catch to be helpful
-				result.push(foundExpr(expr));
-			} catch (e) {
-				console.error(e);
-				result.push(`\{${e.message}\}`);
+			if (stack.length) {
+				let message = `expected ${stack[0]} @ ${endExpr}`;
+				result.push(message);
+				console.error(`${message}: ${text.slice(0, endExpr + 1)}`);
 			}
 			exprStartRegex.lastIndex = endExpr;
 			prevEnd = endExpr;
 		}
-		result.push(text.substr(prevEnd));
+		result.push(text.slice(prevEnd));
 		return result.join("");
 	}
 	function attributeValueToDataFn(value) {
 		let parts = value.split(exprRegex);
 		for (let i = 1; i < parts.length; i += 2) {
 			let plainOrPlaceholder = parts[i];
-			let key = plainOrPlaceholder.substr(1, plainOrPlaceholder.length - 2);
+			let key = plainOrPlaceholder.slice(1, -1);
 			if (plainOrPlaceholder[0] == '{') {
 				if (key == '=') {
 					parts[i] = (pMap => d => d);
@@ -378,7 +427,7 @@ let Matsui = (() => {
 	}
 	// $dash-separated or @dash-separated => camelCase
 	function getAttrKey(attrName) {
-		return attrName.substr(1).toLowerCase().replace(/-+(.)/g, (_, c) => c.toUpperCase());
+		return attrName.slice(1).toLowerCase().replace(/-+(.)/g, (_, c) => c.toUpperCase());
 	}
 	function defaultAttributeFunction(node, attrKey, handler) {
 		if (('on' + attrKey) in node) {
@@ -424,7 +473,7 @@ let Matsui = (() => {
 			let nodeValue = templateNode.nodeValue;
 			let match, prevIndex = 0;
 			while ((match = taggedExprRegex.exec(nodeValue))) {
-				let prefixString = nodeValue.substr(prevIndex, match.index - prevIndex);
+				let prefixString = nodeValue.slice(prevIndex, match.index);
 				prevIndex = taggedExprRegex.lastIndex;
 				
 				let ids = match[1].split('$').slice(1); // $...$... section
@@ -454,7 +503,7 @@ let Matsui = (() => {
 				});
 			}
 			if (prevIndex > 0) { // any remaining parts of the string (if we found any matches)
-				let suffix = nodeValue.substr(prevIndex);
+				let suffix = nodeValue.slice(prevIndex);
 				let setupFn = suffix ? (node => node.nodeValue = suffix) : node => node.remove();
 				setupTemplateSet.push(_ => ({
 					m_nodePath: nodePath,
@@ -792,7 +841,6 @@ let Matsui = (() => {
 						.replace(codeAssemblyRegex, p => `*/${codeParts[p]}/*`) + '*/';
 					fillPlaceholderMap = new Function(functionArgs, functionBody);
 				}
-				if (Object.keys(codeParts).length) console.log(fillPlaceholderMap + "");
 				
 				function removeMarkedNodes(node) {
 					let text = (node.tagName == 'SCRIPT' ? node.textContent : node.nodeValue);
@@ -833,8 +881,7 @@ let Matsui = (() => {
 			if (!cached) {
 				let parts = [strings[0]];
 				for (let i = 0; i < values.length; ++i) {
-					let placeholder = placeholderPrefix + i + placeholderSuffix;
-					parts.push(placeholder);
+					parts.push(placeholderPrefix + i + placeholderSuffix);
 					parts.push(strings[i + 1]);
 				}
 
