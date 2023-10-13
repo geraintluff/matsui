@@ -1,6 +1,6 @@
 let expressionListPrefix = document.currentScript.src.replace('expressions.js', '');
 Test("check expression end", (api, pass, fail, assert) => {
-	let expressionFiles = ['expressions-esfuzz.js'];
+	let expressionFiles = ['expressions-esfuzz.js', 'expressions-eslump.js'];
 	function loadNext() {
 		let src = expressionListPrefix + expressionFiles.pop();
 		let script = document.createElement('script');
@@ -31,7 +31,7 @@ Test("check expression end", (api, pass, fail, assert) => {
 			// a couple of things that failed during development
 			'if (/(?:)/);else;if (/[-]/);else;',
 			'while(0)/~/'
-		].concat(EXPRESSIONS_ESFUZZ);
+		].concat(EXPRESSIONS_ESFUZZ).concat(EXPRESSIONS_ESLUMP);
 		
 		expressions.forEach((code, index) => {
 			let expr = `function(){${code}}`;

@@ -292,100 +292,34 @@ let Matsui = (() => {
 	function replaceExprs(text, foundExpr) {
 		let prevEnd = 0;
 		let match, result = [];
-		// Find end of expression by balanced bracket/quote matching
+		// Find end of expression by brute-force: attempt a parse for every `}` we find, stop when we succeed
 		while ((match = exprStartRegex.exec(text))) {
 			result.push(text.slice(prevEnd, match.index)); // prefix/joiner
-			let stack = ['}'];
-			let startExpr = match.index + 2, endExpr = startExpr;
-			let expectingExpr = false;
-			while (endExpr < text.length && stack.length) {
-				let stackTop = stack[stack.length - 1];
-				let closeChar = stackTop || stack[stack.length - 2];
-				let c = text[endExpr++];
-				if (c == '\\') {
-					++endExpr;
-				} else if (c == closeChar) {
-					stack.pop();
-					if (!stackTop) stack.pop();
-					expectingExpr = false;
-					if (!stack[stack.length - 1]) {
-						stack.pop();
-						expectingExpr = true;
-					}
-				} else if (closeChar == '`') {
-					if (c == '$' && text[endExpr + 1] == "{") {
-						stack.push("}");
-						++endExpr;
-						expectingExpr = true;
-					}
-				} else if (/\s/.test(c)) {
-					// do nothing
-				} else if (closeChar != '"' && closeChar != "'") {
-					if (c == '{') {
-						stack.push("}");
-						expectingExpr = true;
-					} else if (c == '"' || c == "'" || c == '`') {
-						stack.push(c);
-					} else if (c == '(') {
-						stack.push(')');
-						expectingExpr = true;
-					} else if (c == '[') {
-						stack.push(']');
-						expectingExpr = true;
-					} else if (c == '/') {
-						let next = text[endExpr];
-						if (next == '/') {
-							while (endExpr < text.length && text[endExpr] != '\n' && text[endExpr] != '\r') endExpr++;
-						} else if (next == '*') {
-							endExpr += 3;
-							while (endExpr < text.length && (text.slice(endExpr - 2, endExpr) != '*/')) endExpr++;
-						} else if (expectingExpr) { // regular expression
-							while (endExpr < text.length && text[endExpr] != '/') {
-								c = text[endExpr];
-								if (c == '[') {
-									while (c && c != ']') {
-										if (c == '\\') ++endExpr;
-										c = text[++endExpr];
-									}
-								}
-
-								if (c == '\\') ++endExpr;
-								++endExpr;
-							}
-							stack.push('/'); // expect the regexp to close immediately
-						} else { // division
-							expectingExpr = true;
-						}
-					} else if (/[=<>\+\-%\*&\|\^~!\?\:,;]/.test(c)) {
-						expectingExpr = true;
-					} else if (c == '.') {
-						expectingExpr = false;
-					} else { // collect everything until the next familiar token
-						let sequenceStart = endExpr - 1;
-						while (text[endExpr] && !/[\s\/\(\)\[\]\{\}\."'\`=<>\+\-%\*&\|\^~!\?\:,;]/.test(text[endExpr])) {
-							++endExpr;
-						}
-						let sequence = text.slice(sequenceStart, endExpr);
-						if (/^(delete|typeof|void|in|instanceof|new|throw)$/.test(sequence)) {
-							expectingExpr = true;
-						} else if (/^(if|else|for|while|switch|case|try|catch|finally|with)$/.test(sequence)) {
-							expectingExpr = true;
-							if (stackTop) stack.push("");
-						} else {
-							expectingExpr = false;
-						}
+			
+			let startExpr = match.index + 2, endExpr = startExpr + 1;
+			let error;
+			while (endExpr < text.length) {
+				if (text[endExpr] == '}') {
+					let candidate = text.slice(startExpr, endExpr);
+					try {
+						error = null;
+						// This doesn't *run* the code, but it throws an error if the syntax is invalid
+						new Function('return ' + candidate);
+						break;
+					} catch (e) {
+						error = e;
 					}
 				}
+				++endExpr;
 			}
-			if (stack.length) {
-				let message = `expected ${stack[0]} @ ${endExpr}`;
-				result.push(message);
-				throw Error(`${message}: ${text.slice(0, endExpr + 1)}`);
+			
+			if (error) {
+				result.push(`{${error.message}}`);
+				return result.join("");
 			} else {
-				result.push(foundExpr(text.slice(startExpr, endExpr - 1)));
+				result.push(foundExpr(text.slice(startExpr, endExpr)));
 			}
-			exprStartRegex.lastIndex = endExpr;
-			prevEnd = endExpr;
+			exprStartRegex.lastIndex = prevEnd = endExpr + 1;
 		}
 		result.push(text.slice(prevEnd));
 		return result.join("");
