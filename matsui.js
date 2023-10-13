@@ -797,6 +797,7 @@ let Matsui = (() => {
 							removeMarkedNodes(child);
 							child = next;
 						}
+						if (node.tagName == 'TEMPLATE') removeMarkedNodes(node.content);
 					}
 				}
 				removeMarkedNodes(content);

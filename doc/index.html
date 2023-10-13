@@ -266,7 +266,10 @@ Matsui.addTo(div, {name: "you"}, template);
 				<dt><code>.addElement(name, node, ?filter)</code></dt>
 				<dt><code>.addElement(name, '#query', ?filter)</code></dt>
 				<dt><code>.addTag(name, ?filter)`template`</code></dt>
-				<dd>Registers a template with the given name.  If <code>filter</code> is provided, then it becomes the new highest-priority option for the <code>.dynamic</code> template.</dd>
+				<dd>
+					<p>Registers a template with the given name.  These templates can then be referenced by name in any template added/created using this template set.</p>
+					<p>If <code>filter</code> is provided, then it becomes the new highest-priority option for the <code>.dynamic</code> template.</p>
+				</dd>
 
 				<dt><code>.getNamed("...")</code></dt>
 				<dd>Returns the template registered with this name, or <code>.dynamic</code> if none is found.</dd>
@@ -287,25 +290,25 @@ Matsui.addTo(div, {name: "you"}, template);
 					Functions to use for <code>@...</code> transforms.
 				</dd>
 			</dl>
+			<p>Attributes and transforms should be <code>dash-separated=""</code> on the elements, and <code>.camelCase</code> on the <code>.attributes</code>/<code>.transforms</code>.</p>
 			
 			<h3>Custom attributes</h3>
 			<p>The values in <code>templateSet.attributes</code> are functions, which will be given two arguments:</p>
 			<ul>
 				<li><code>node</code>: the element containing the attribute</li>
-				<li><code>valueFn</code>: a function to call which gets the latest value</li>
+				<li><code>valueFn</code>: a value derived from the attribute value</li>
 			</ul>
-			<p>The <code>valueFn</code> will use the latest-rendered data (or <code>null</code> if no render has happened yet to fill out the attribute value.  If the attribute body is just a single <code>{...}</code> or <code>${...}</code> expression, then the returned value is whatever type that returns.  Otherwise, all the values are concatenated into a string.</p>
+			<p>If any parts of the attribute value are functions (defined like <code>{key}</code> or <code>${d => expr}</code>), then the <code>valueFn</code> passed to the attribute handler is also a function.  The latest-rendered data (or <code>null</code> if no render has happened yet) is passed to these functions, as well as any extra arguments handed to <code>valueFn</code>.</p>
+			<p>If the attribute body is just a single value <code>{...}</code> or <code>${...}</code> expression, then the returned value is whatever type that returns.  Otherwise, all the values are concatenated into a string.</p>
 			<p>The custom-attribute function <em>may</em> return an update function with a single <code>data</code> argument.  Any additional arguments passed to <code>valueFn</code> will be handed to any functions from its body, e.g.:</p>
 			<script>
 				matsuiExample({
 					html: `
 <div>
 	<p>Pressed: {when}</p>
-	<div $now="\${(data, now) => data.when = now}">
-		<strong style="user-select: none">
-			press me
-		</strong>
-	</div>
+	<button $now="\${(d, now) => d.when = now}">
+		press me
+	</button>
 </div>`,
 					js: `
 let custom = Matsui.global.extend();
@@ -337,10 +340,10 @@ Matsui.replace(div, {when: "not yet"}, custom);
 				matsuiExample({
 					html: `
 <div>
-	<button $click="\${d => d.value = !d.value}">
+	<button $click="\${d => d.show = !d.show}">
 		toggle
 	</button>
-	<template @if="{value}">
+	<template @if="{show}">
 		<template @repeat="5">
 			Hooray!<br>
 		</template>
@@ -350,10 +353,27 @@ Matsui.replace(div, {when: "not yet"}, custom);
 let custom = Matsui.global.extend();
 
 function repeat(template, valueFn, templateSet) {
-	// evaluates immediately, as if data is null
-	let repeatCount = parseInt(valueFn());
+	// assumes it's a constant, not a function
+	let repeatCount = parseInt(valueFn);
 	
 	return innerTemplate => {
+		let n = document.createDocumentFragment();
+		let binding = {
+			node: n,
+			updates: []
+		};
+
+		for (let r = 0; r < repeatCount; ++r) {
+			let b = template(innerTemplate);
+			// Collect the nodes together
+			binding.node.append(b.node);
+			// Collect the updates
+			b.updates.forEach(fn => {
+				binding.updates.push(fn);
+			});
+		}
+		
+		return binding;
 	};
 };
 custom.transforms.repeat = repeat;
@@ -365,7 +385,7 @@ Matsui.replace(div, {value: false}, custom);
 					}
 				});
 			</script>
-			<p>This transform is run once, before any rendering happens.  If you call <code>valueFn</code> straight away, it will evaluate as if the data is <code>null</code>.  This is still useful for cases like <code>@repeat="5"></code></p>
+			<p>This transform is run once, before any rendering happens.  The <code>valueFn</code> is calculated the same as for custom attributes..  This is still useful for cases like <code>@repeat="5"></code></p>
 			
 			<h2>Smart updates</h2>
 			<p>Filling out a template is simple enough: stick the <code>.node</code> somewhere, and call all the update functions (with a single <code>data</code> argument) as many times as you like.</p>
@@ -416,11 +436,11 @@ Matsui.replace(div, {value: false}, custom);
 			</dl>
 			<p>This wrapping function takes an optional second argument: <code>Matsui.wrap(value, isSync)</code> which determines whether any changes made to the data (through <code>.data()</code> or by the templates themselves) are updated immediately, or collected and updated asynchronously.  The default behaviour is asynchronous, so that multiple changes produce a single merge/render update.</p>
 			
+			
+<!--
 			<h2>Sync</h2>
 			<p>The wrapped data (from <code>Matsui.wrap(...)</code>) also has a <code>.sync()</code> method:</p>
 			<todo>sync</todo>
-			
-<!--
 
 			<h3>Principles</h3>
 			
