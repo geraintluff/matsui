@@ -2,7 +2,7 @@ Matsui.merge.apply(Matsui.Wrapped.prototype, {
 	syncHash(dataToSyncTarget) {
 		let wrapped = this;
 		function parseHash() {
-			let syncTarget = dataToSyncTarget(wrapped.data());
+			let syncTarget = dataToSyncTarget(wrapped.data);
 			let fragment = location.href.replace(/^[^#]*#?/, '');
 			let path = fragment.replace(/\?.*/, '');
 			let queryString = fragment.substr(path.length + 1);
@@ -52,7 +52,7 @@ Matsui.merge.apply(Matsui.Wrapped.prototype, {
 	syncLocalStorage(dataToSyncTarget) {
 		let wrapped = this;
 		function readFromStorage(key) {
-			let syncTarget = dataToSyncTarget(wrapped.data());
+			let syncTarget = dataToSyncTarget(wrapped.data);
 			if (key === null) { // reload everything
 				for (let k in syncTarget) {
 					readFromStorage(k);

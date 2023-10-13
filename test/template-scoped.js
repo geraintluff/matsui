@@ -19,15 +19,15 @@
 		});
 		$('.baz-button').dispatchEvent(event);
 
-		assert(data.data().foo === 'BAR'); // the click worked
+		assert(data.data.foo === 'BAR'); // the click worked
 		assert($('.scoped-foo').innerHTML == 'bar'); // but the display didn't update
 		assert($('.baz-button').innerHTML == 'bing'); // still good
 		
-		data.data().baz = 'BING';
+		data.data.baz = 'BING';
 		assert($('.scoped-foo').innerHTML == 'bar'); // still not updated
 		assert($('.baz-button').innerHTML == 'BING'); // but this is
 		
-		data.setData({foo: 'BAR', baz: 'bing!'}); // new data object
+		data.data = {foo: 'BAR', baz: 'bing!'}; // new data object
 		assert($('.scoped-foo').innerHTML == 'BAR'); // it's updated now
 		assert($('.baz-button').innerHTML == 'bing!'); // so is this
 	}

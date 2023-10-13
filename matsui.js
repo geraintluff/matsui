@@ -1,5 +1,5 @@
 "use strict"
-let Matsui = (() => {
+self.Matsui = (() => {
 	let isObject = data => (data && typeof data === 'object');
 	let makePlaceholderNode = () => document.createTextNode("");
 	function clearBetween(before, after) {
@@ -1029,18 +1029,21 @@ let Matsui = (() => {
 			mergeTracked = merge.tracked(data, sendUpdate, !synchronous);
 		};
 		setData(data);
-		this.data = () => {
-			return mergeTracked;
-		};
+
+		Object.defineProperty(this, 'data', {
+			get() {
+				return mergeTracked;
+			},
+			set(newData) {
+				let mergeObj = merge.make(data, newData);
+				setData(newData);
+				sendUpdate(mergeObj, true);
+			}
+		});
 		// Make changes to the data
 		this.merge = mergeObj => {
 			let newData = merge.apply(data, mergeObj);
 			if (newData !== data) setData(newData);
-			sendUpdate(mergeObj, true);
-		};
-		this.setData = newData => {
-			let mergeObj = merge.make(data, newData);
-			setData(newData);
 			sendUpdate(mergeObj, true);
 		};
 		
@@ -1093,7 +1096,9 @@ let Matsui = (() => {
 		scoped: scoped,
 
 		Wrapped: Wrapped,
-		wrap: (data, synchronous) => new Wrapped(data, synchronous),
+		wrap(data, synchronous) {
+			return new Wrapped(data, synchronous);
+		},
 		addTo: (element, data, template) => {
 			return api.wrap(data).addTo(element, template);
 		},

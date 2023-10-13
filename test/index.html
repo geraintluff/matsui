@@ -159,7 +159,7 @@
 
 					document.body.innerHTML = '';
 					let render = Matsui.addTo(document.body, renderData, template).addTo('head title', '#title-suffix');
-					renderData = render.data();
+					renderData = render.data;
 					
 					let iframeRunner = document.getElementById('iframe-runner');
 				
