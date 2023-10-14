@@ -204,7 +204,9 @@
 					let suitesLoaded = 0;
 					suites.forEach(suite => {
 						suite.load(onload => {
-							if (failed) return renderData.message = `error in ${suite.name}: ${renderData.message}`;
+							if (failed) {
+								return renderData.message = `error in ${suite.name}: ${renderData.message}`;
+							}
 							if (++suitesLoaded == suites.length) {
 								renderData.message = "all suites loaded";
 

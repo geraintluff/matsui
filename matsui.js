@@ -426,6 +426,18 @@ self.Matsui = (() => {
 				let fixedValue = plainKey && (plainKey == '=' ? (d => d) : (d => d ? d[plainKey]: null));
 				setupTemplateSet.push((templateSet, placeholderMap) => {
 					let value = fixedValue || placeholderMap[placeholderKey];
+					if (typeof value === 'function') {
+						if (ids[0] === 'template') {
+							templateSet = templateSet.extend();
+							templateSet.add('template', value);
+							value = (d => d);
+						} else if (ids[0] === 'scoped') {
+							templateSet = templateSet.extend();
+							let getTemplate = value;
+							templateSet.add('scoped', scoped(data => getTemplate(data, templateSet)));
+							value = (d => d);
+						}
+					}
 					return {
 						m_nodePath: nodePath,
 						m_fn: (node, updates, innerTemplate) => {
@@ -496,6 +508,7 @@ self.Matsui = (() => {
 					setupTemplateSet.push((templateSet, placeholderMap) => {
 						let inPlaceTemplate;
 						if (templateNode.getAttribute("@scoped")) {
+							// TODO: could we use this in the tagged version like <template @scoped>${scopedData => {...}</template> ?
 							inPlaceTemplate = scoped(data => {
 								let subPlaceholderMap = {};
 								placeholderMap[subMapKey](subPlaceholderMap, data);
@@ -978,7 +991,6 @@ self.Matsui = (() => {
 	function scoped(untrackedDataToTemplate) {
 		return innerTemplate => {
 			let combined; // combined updates
-
 			let clearable = makeClearable();
 			
 			return {

@@ -102,4 +102,17 @@
 		testTemplate(api.global.fromElement(element), assert);
 		pass();
 	}, {document: true, csp: false});
+
+	Test("$scoped", (api, pass, fail, assert) => {
+		let template = api.global.fromTag`
+			<section>$scoped${(scopedData, tset) => {
+				return tset.fromTag`
+					<div class="scoped-foo">${scopedData.foo}</div>
+					<button class="baz-button" $click="${e => scopedData.foo = 'BAR'}">{baz}</button>
+				`;
+			}}</section>
+		`;
+		testTemplate(template, assert);
+		pass();
+	}, {document: true, csp: false});
 })();

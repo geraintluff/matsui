@@ -349,3 +349,43 @@ Test("parse from tag", (api, pass, fail, assert) => {
 
 }, {document: true, csp: true});
 
+Test("$template", (api, pass, fail, assert) => {
+	let templateSet = api.global.extend();
+
+	let textTemplate = _ => {
+		let node = document.createTextNode('');
+		return {
+			node: node,
+			updates: [data => {
+				node.nodeValue = `${typeof data}:${data}`;
+			}]
+		};
+	};
+
+	let template = templateSet.fromTag`
+		<div class="foo">{foo}</div>
+		<div class="bar">$template${innerTemplate => {
+			let binding = innerTemplate(innerTemplate);
+			binding.updates = binding.updates.map(fn => {
+				return d => fn(d.bar);
+			});
+			return binding;
+		}}</div>
+	`;
+
+	let binding = template(textTemplate);
+	let element = document.createElement('div');
+	element.appendChild(binding.node);
+
+	let data = {
+		foo: 'FOO',
+		bar: 'BAR'
+	};
+	binding.updates.forEach(fn => fn(data));
+
+	assert(element.querySelector('.foo').innerHTML == 'string:FOO');
+	assert(element.querySelector('.bar').innerHTML == 'string:BAR');
+	
+	pass();
+
+}, {document: true});
