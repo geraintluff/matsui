@@ -44,7 +44,7 @@
 			<div class="scoped-foo">${scopedData.foo}</div>
 			<button class="baz-button" $click="${e => scopedData.foo = 'BAR'}">{baz}</button>
 		`);
-		testTemplate(templateSet.getNamed("scoped-example"), assert);
+		testTemplate(templateSet.named["scoped-example"], assert);
 
 		pass();
 	}, {document: true});

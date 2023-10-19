@@ -129,11 +129,10 @@ self.Matsui = (() => {
 				set(obj, prop, value, proxy) {
 					if (value == null) return (delete proxy[prop]);
 					value = getRaw(value);
-					let oldValue = obj[prop];
+					let propMerge = merge.make(obj[prop], value, true);
+					if (typeof propMerge === 'undefined') return true; // === match, do nothing
 					if (Reflect.set(obj, prop, value)) {
-						updateFn({
-							[prop]: merge.make(oldValue, value)
-						});
+						updateFn({[prop]: propMerge});
 						return true;
 					}
 					return false;
@@ -277,7 +276,12 @@ self.Matsui = (() => {
 	/*--- HTML template ---*/
 
 	function instantiateTemplateWithIds(templateSet, ids, innerTemplate) {
-		let named = ids.map(name => templateSet.getNamed(name));
+		let named = ids.map(name => {
+			let template = templateSet.named[name];
+			if (template) return template;
+			console.error("Template not found: " + name);
+			return templateSet.dynamic;
+		});
 		function getTemplate(depth) {
 			if (depth >= ids.length) return innerTemplate;
 			let template = named[depth];
@@ -333,7 +337,13 @@ self.Matsui = (() => {
 				if (key == '=') {
 					parts[i] = (pMap => d => d);
 				} else {
-					parts[i] = (pMap => d => d[key]);
+					let keyPath = key.split('.');
+					parts[i] = pMap => d => {
+						keyPath.forEach(key => {
+							if (d && typeof d == 'object') d = d[key];
+						});
+						return d;
+					};
 				}
 			} else {
 				parts[i] = (pMap => pMap[key]);
@@ -389,8 +399,8 @@ self.Matsui = (() => {
 	
 	// Arbitrarily-picked vendor-reserved Unicode points
 	let placeholderPrefix = '\uF74A', placeholderSuffix = '\uF74B';
-	let exprRegex = /(\{[a-z0-9_=-]+\}|\uF74A[0-9]+\uF74B)/uig;
-	let taggedExprRegex = /((\$[a-z0-9_-]+)*)(\{([a-z0-9_=-]+)\}|\uF74A([0-9]+)\uF74B)/uig;
+	let exprRegex = /(\{[a-z0-9_=\.-]+\}|\uF74A[0-9]+\uF74B)/uig;
+	let taggedExprRegex = /((\$[a-z0-9_-]+)*)(\{([a-z0-9_=\.-]+)\}|\uF74A([0-9]+)\uF74B)/uig;
 	let subTemplatePlaceholderKey = Symbol();
 	function getPendingTemplate(definitionElement) {
 		let cloneable = definitionElement.content || definitionElement;
@@ -403,10 +413,15 @@ self.Matsui = (() => {
 				let name = child.getAttribute('name');
 				if (name) {
 					hasNamedChildren = true;
+					let pendingFilter = (pMap => null);
+					if (child.hasAttribute('$filter')) {
+						pendingFilter = attributeValueToDataFn(child.getAttribute('$filter'));
+					}
 					namedChildTemplates[name] = {
 						m_pending: getPendingTemplate(child),
 						m_scoped: child.getAttribute('@scoped'),
-						m_placeholderKey: child[subTemplatePlaceholderKey]
+						m_placeholderKey: child[subTemplatePlaceholderKey],
+						m_filter: pendingFilter
 					};
 					child.remove();
 				}
@@ -423,7 +438,16 @@ self.Matsui = (() => {
 				let ids = match[1].split('$').slice(1); // $...$... section
 				
 				let plainKey = match[4], placeholderKey = match[5];
-				let fixedValue = plainKey && (plainKey == '=' ? (d => d) : (d => d ? d[plainKey]: null));
+				let fixedValue = null;
+				if (plainKey) {
+					let keyPath = (plainKey == '=') ? [] : plainKey.split('.');
+					fixedValue = d => {
+						keyPath.forEach(key => {
+							if (d && typeof d == 'object') d = d[key];
+						});
+						return d;
+					};
+				}
 				setupTemplateSet.push((templateSet, placeholderMap) => {
 					let value = fixedValue || placeholderMap[placeholderKey];
 					if (typeof value === 'function') {
@@ -468,8 +492,9 @@ self.Matsui = (() => {
 			}
 		}
 				
-		function walkAttribute(attr, nodePath) {
+		function walkAttribute(node, attr, nodePath) {
 			if (attr.name[0] != '$') return;
+			node.removeAttribute(attr.name);
 			let attrKey = getAttrKey(attr.name);
 			let getDataFn = attributeValueToDataFn(attr.value);
 
@@ -534,9 +559,11 @@ self.Matsui = (() => {
 					});
 					templateNode.replaceWith(makePlaceholderNode());
 					return;
+				} else if (templateNode.tagName === 'SCRIPT') {
+					return;
 				} else {
-					for (let attr of templateNode.attributes) {
-						walkAttribute(attr, nodePath);
+					for (let attr of Array.from(templateNode.attributes)) {
+						walkAttribute(templateNode, attr, nodePath);
 					}
 				}
 			}
@@ -546,9 +573,10 @@ self.Matsui = (() => {
 		}
 		walk(cloneable, []);
 		
-		let templateTransforms = {};
+		let templateTransforms = {}, hasTemplateTransforms = false;
 		for (let attr of definitionElement.attributes || []) {
 			if (attr.name[0] == '@') {
+				hasTemplateTransforms = true;
 				let attrKey = getAttrKey(attr.name);
 				if (attrKey != 'scoped') {
 					templateTransforms[attrKey] = attributeValueToDataFn(attr.value);
@@ -557,7 +585,8 @@ self.Matsui = (() => {
 		}
 
 		return (templateSet, placeholderMap) => {
-			if (hasNamedChildren) {
+			let originalSet = templateSet; // so that transforms can do stuff with named siblings etc.
+			if (hasNamedChildren || hasTemplateTransforms) {
 				templateSet = templateSet.extend();
 				for (let name in namedChildTemplates) {
 					let obj = namedChildTemplates[name];
@@ -576,8 +605,9 @@ self.Matsui = (() => {
 						} else {
 							subPlaceholderMap = placeholderMap;
 						}
+						let filter = obj.m_filter(subPlaceholderMap);
 						let template = obj.m_pending(templateSet, subPlaceholderMap);
-						templateSet.add(name, template);
+						templateSet.add(name, template, filter);
 					}
 				}
 			}
@@ -602,7 +632,7 @@ self.Matsui = (() => {
 			for (let key in templateTransforms) {
 				let transform = templateSet.transforms[key];
 				if (!transform) throw Error("Unknown transform: " + key);
-				result = transform(result, templateTransforms[key](placeholderMap), templateSet);
+				result = transform(result, templateTransforms[key](placeholderMap), originalSet, templateSet);
 			}
 			return result;
 		};
@@ -615,13 +645,13 @@ self.Matsui = (() => {
 	class TemplateSet {
 		attributes = {};
 		transforms = {};
+		named = {};
 	
 		constructor(parent) {
 			this.#parent = parent;
-			if (parent) {
-				this.attributes = Object.create(parent.attributes);
-				this.transforms = Object.create(parent.transforms);
-			}
+			this.attributes = Object.create(parent ? parent.attributes : null);
+			this.transforms = Object.create(parent ? parent.transforms : null);
+			this.named = Object.create(parent ? parent.named : null);
 
 			/* Switches between templates, based on the filtered list */
 			this.dynamic = innerTemplate => {
@@ -647,7 +677,6 @@ self.Matsui = (() => {
 		}
 		
 		#parent;
-		#map = {};
 		#filtered = [];
 		
 		extend() {
@@ -659,7 +688,7 @@ self.Matsui = (() => {
 				template = template.dynamic;
 			}
 			if (typeof template !== 'function') throw Error('Template not a function');
-			if (name) this.#map[name] = template;
+			if (name) this.named[name] = template;
 			if (filter) {
 				this.#filtered.unshift({
 					m_filter: filter,
@@ -692,12 +721,6 @@ self.Matsui = (() => {
 			this.add(name, scoped(scopedTemplate), filter);
 		}
 
-		getNamed(name) {
-			if (this.#map[name]) return this.#map[name];
-			if (this.#parent) return this.#parent.getNamed(name);
-			console.error("Unknown template:", name);
-			return this.dynamic;
-		}
 		getForData(data, extraResults) {
 			for (let i = 0; i < this.#filtered.length; ++i) {
 				let entry = this.#filtered[i];
@@ -746,6 +769,7 @@ self.Matsui = (() => {
 								codeParts[placeholder] = node.textContent;
 								node.textContent = placeholder;
 							}
+							return; // don't process <script>s any more than that
 						}
 						let processAttributes = _ => {
 							for (let attr of node.attributes) {
@@ -927,7 +951,7 @@ self.Matsui = (() => {
 					// add new entries
 					while (updateList.length < data.length) {
 						let endSep = addSeparator();
-						let binding = innerTemplate(globalSet.getNamed("json"));
+						let binding = innerTemplate(globalSet.named.json);
 						endSep.before(binding.node);
 						updateList.push(combineUpdates(binding.updates));
 					}
@@ -956,11 +980,13 @@ self.Matsui = (() => {
 		};
 	};
 	globalSet.transforms.foreach = (template, dataFn, templateSet) => {
-		let list = templateSet.getNamed('list');
+		let list = templateSet.named.list;
 		let listTemplate = innerTemplate => list(_ => template(innerTemplate));
 		return globalSet.transforms.data(listTemplate, dataFn, templateSet);
 	};
+	let latestIfKey = Symbol();
 	globalSet.transforms['if'] = (conditionalTemplate, dataFn, templateSet) => {
+		templateSet[latestIfKey] = dataFn;
 		return innerTemplate => {
 			let clearable = makeClearable();
 
@@ -986,6 +1012,13 @@ self.Matsui = (() => {
 				}]
 			};
 		};
+	};
+	globalSet.transforms['else'] = (template, _, templateSet) => {
+		let ifCondition = templateSet[latestIfKey];
+		if (!ifCondition) throw Error('@else must follow @if');
+		template = globalSet.transforms['if'](template, d => !ifCondition(d), templateSet);
+		delete templateSet[latestIfKey];
+		return template;
 	};
 
 	function scoped(untrackedDataToTemplate) {

@@ -3,7 +3,7 @@ Test("text", (api, pass, fail, assert) => {
 		fail("inner template should not be called");
 	};
 	
-	let textTemplate = api.global.getNamed("text");
+	let textTemplate = api.global.named.text;
 	let binding = textTemplate(errorTemplate);
 	
 	assert(binding.node instanceof Text); // Should be a DOM text node
@@ -42,7 +42,7 @@ Test("list", (api, pass, fail, assert) => {
 		};
 	};
 	
-	let listTemplate = api.global.getNamed("list");
+	let listTemplate = api.global.named.list;
 	let binding = listTemplate(_ => itemTemplate(fallbackTemplate));
 	let container = document.createElement('div');
 	container.append(binding.node);
@@ -208,7 +208,7 @@ Test("parse from element", (api, pass, fail, assert) => {
 		<div class="upper-bar">$uppercase\${d => d.bar}</div>
 	`;
 	templateSet.addElement('named-div', divElement);
-	let divTemplate = templateSet.getNamed('named-div');
+	let divTemplate = templateSet.named['named-div'];
 	
 	function testTemplate(template) {
 		let binding = template(customTextTemplate);
@@ -314,7 +314,7 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		<div class="upper-foo">$uppercase{foo}</div>
 		<div class="upper-bar">$uppercase${d => d.bar}</div>
 	`;
-	let tagTemplateNamed = templateSet.getNamed("named-tag");
+	let tagTemplateNamed = templateSet.named["named-tag"];
 	
 	function testTemplate(template) {
 		let binding = template(customTextTemplate);

@@ -7,7 +7,9 @@ Matsui.merge.apply(Matsui.Wrapped.prototype, {
 			let path = fragment.replace(/\?.*/, '');
 			let queryString = fragment.substr(path.length + 1);
 
-			syncTarget.path = path;
+			if (syncTarget.path !== path) {
+				syncTarget.path = path;
+			}
 
 			let query = {};
 			queryString.split('&').forEach(pair => {
@@ -21,7 +23,9 @@ Matsui.merge.apply(Matsui.Wrapped.prototype, {
 				});
 				query[parts.shift()] = parts.join('=');
 			});
-			syncTarget.query = query;
+			if (syncTarget.query !== query) {
+				syncTarget.query = query;
+			}
 		}
 		addEventListener("hashchange", parseHash);
 		parseHash();
@@ -38,14 +42,20 @@ Matsui.merge.apply(Matsui.Wrapped.prototype, {
 			let queryString = '';
 			let query = syncTarget.query;
 			if (query && typeof query === 'object') {
-				queryString = Object.keys(query).map(key => (
-					[key, query[key]].map(encodeURIComponent).join('=')
-				)).join('&');
+				queryString = Object.keys(query).map(key => {
+					if (query[key] === '') return encodeURIComponent(key);
+					return [key, query[key]].map(encodeURIComponent).join('=')
+				}).join('&');
 			}
 
 			let result = path + (queryString && '?') + queryString;
 			if (result != fragment) {
-				location.replace('#' + result);
+				// Creates history if the path changes, but not if it's just the query
+				if (fragment.replace(/\?.*/, '') == path) {
+					location.replace('#' + result);
+				} else {
+					location.href = ('#' + result);
+				}
 			}
 		});
 	},
