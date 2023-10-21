@@ -1,24 +1,37 @@
 Test("combining updates", (api, pass, fail, assert) => {
 	let data = {
 		foo: 'bar',
-		baz: ['bing', 'zap']
+		baz: ['bing', 'zap'],
+		bip: {bang: true, boom:  false}
 	};
-	
+
 	let updates = [
+		// pierced root object
+		data => {
+			let root = api.access.pierce(data);
+		},
+		// silent-pierced root object
+		data => {
+			let root = api.access.pierce(data, true);
+		},
 		// foo
 		data => {
 			assert(data.foo == 'bar');
 		},
-		// foo + root object (via Object.keys)
+		// foo + root keys
 		data => {
-			assert(Object.keys(data).length == 2);
+			assert(Object.keys(data).length == 3);
 			assert(data.foo == 'bar');
+		},
+		// baz (access)
+		data => {
+			assert(data.baz);
 		},
 		// baz[0]
 		data => {
 			assert(data.baz[0] == 'bing');
 		},
-		// baz (by baz.length)
+		// baz keys (by baz.length)
 		data => {
 			assert(data.baz.length == 2);
 		},
@@ -26,19 +39,41 @@ Test("combining updates", (api, pass, fail, assert) => {
 		data => {
 			let baz = api.access.pierce(data.baz);
 		},
+		// baz (by silent piercing)
+		data => {
+			let baz = api.access.pierce(data.baz, true);
+		},
 		// the non-existent property .florp
 		data => {
 			assert(typeof data.florp == 'undefined');
 		},
-		// root object (by piercing)
-		data => {
-			let baz = api.access.pierce(data);
-		},
-		// only on the first run, or if the top-level object is replaced (since that could change the boolean status, and we have no way of telling if that's checked)
+		// unrelated data
 		data => {
 			let unrelated = {fiveHundred: 500};
 			let pierced = api.access.pierce(unrelated);
 			assert(pierced === unrelated); // don't do anything weird
+		},
+		// access bip directly, but don't look at the contents
+		data => {
+			let bip = data.bip;
+		},
+		// access bip with pierce
+		data => {
+			let pierced = api.access.pierce(data.bip);
+		},
+		// list bip keys - should care about add/remove keys, but not changing their values
+		data => {
+			let bipKeys = Object.keys(data.bip);
+		},
+		// bip keys, with a different method
+		data => {
+			for (let k in data.bip) {
+				k = k;
+			}
+		},
+		// bip.bang - cares about changing a particular value
+		data => {
+			let bipBang = data.bip.bang;
 		}
 	];
 
@@ -71,58 +106,95 @@ Test("combining updates", (api, pass, fail, assert) => {
 		combined(withMerge);
 	};
 	updateWithMerge({bar: 5, bink: "BINK"}); // call with anything
-	assert.deepEqual(callCount(), [1, 1, 1, 1, 1, 1, 1, 1]);
+
+	assert.deepEqual(callCount(), [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
 
 	for (let repeat = 0; repeat < 2; ++repeat) {
-		// accessing root, foo
+		let split = x => x.split('').map(parseFloat);
+	
+		// replacing foo
 		updateWithMerge({
 			foo: 'BAR'
 		});
-		assert.deepEqual(callCount(), [1, 1, 0, 0, 0, 0, 1, 0]);
+		assert.deepEqual(callCount(), split('1011000000000000'));
 		
-		// same again: the leaf merge values aren't actually used, only the tree shape is what matters
+		// deleting foo
 		updateWithMerge({
 			foo: null
 		});
-		assert.deepEqual(callCount(), [1, 1, 0, 0, 0, 0, 1, 0]);
-		
-		// accessing root, baz, baz[0]
+		assert.deepEqual(callCount(), split('1011000000000000'));
+
+		// accessing baz[0] - counts as changing the keys because we're fully replacing a value
 		updateWithMerge({
 			baz: {0: "BING"}
 		});
-		assert.deepEqual(callCount(), [0, 1, 1, 1, 1, 0, 1, 0]);
+		assert.deepEqual(callCount(), split('1000011100000000'));
 		
-		// accessing root, baz, and a non-existent index of baz
+		// changing a new index of baz
 		updateWithMerge({
 			baz: {4: "four"}
 		});
-		assert.deepEqual(callCount(), [0, 1, 0, 1, 1, 0, 1, 0]);
+		assert.deepEqual(callCount(), split('1000001100000000'));
 
-		// accessing root, baz (by claiming to replace it) and baz[0] (because baz was replaced)
+		// replacing all of baz
 		updateWithMerge({
 			baz: "BAZ"
 		});
-		assert.deepEqual(callCount(), [0, 1, 1, 1, 1, 0, 1, 0]);
+		assert.deepEqual(callCount(), split('1001111110000000'));
 
-		// accessing root, baz (by claiming to delete it) and baz[0] (because the baz was deleted)
+		// deleting baz
 		updateWithMerge({
 			baz: null
 		});
-		assert.deepEqual(callCount(), [0, 1, 1, 1, 1, 0, 1, 0]);
+		assert.deepEqual(callCount(), split('1001111110000000'));
 
-		// accessing root, and the non-existent property florp
+		// the non-existent property florp
 		updateWithMerge({
 			florp: "FLORP"
 		});
-		assert.deepEqual(callCount(), [0, 1, 0, 0, 0, 1, 1, 0]);
+		assert.deepEqual(callCount(), split('1001000001000000'));
 
 		// accessing just root, with no actual changes
 		updateWithMerge({});
-		assert.deepEqual(callCount(), [0, 1, 0, 0, 0, 0, 1, 0]);
+		assert.deepEqual(callCount(), split('1000000000000000'));
 		updateWithMerge("mystery"); // claims to replace everything
-		assert.deepEqual(callCount(), [1, 1, 1, 1, 1, 1, 1, 1]);
+		assert.deepEqual(callCount(), split('1111111111111111'));
 		updateWithMerge(null); // claims to delete everything
-		assert.deepEqual(callCount(), [1, 1, 1, 1, 1, 1, 1, 1]);
+		assert.deepEqual(callCount(), split('1111111111111111'));
+
+		// pierced root object
+		// silent-pierced root object
+		// foo
+		// foo + root keys
+		
+		// baz (access)
+		// baz[0]
+		// baz keys (by baz.length)
+		// baz (by piercing)
+		
+		// baz (by silent piercing)
+		// the non-existent property .florp
+		// unrelated data
+		// access bip directly, but don't look at the contents
+		
+		// access bip with pierce
+		// bip keys - should care about add/remove keys, but not changing their values
+		// bip keys, with a different method
+		// bip.bang - cares about changing a particular value
+
+		// no change to bip
+		updateWithMerge({bip: {}});
+		assert.deepEqual(callCount(), split('1000000000001000'));
+		// special replacement merge which remembers it's doing a full overwrite of bip
+		let replaceMerge = api.merge.apply({bip: null}, {bip: {}}, true);
+		updateWithMerge(replaceMerge);
+		assert.deepEqual(callCount(), split('1001000000011111'));
+		updateWithMerge({bip: 5});
+		assert.deepEqual(callCount(), split('1001000000011111'));
+		updateWithMerge({bip: {bang: 6}});
+		assert.deepEqual(callCount(), split('1000000000001111'));
+		updateWithMerge({bip: {florp: 100}});
+		assert.deepEqual(callCount(), split('1000000000001110'));
 	}
 	pass()
 });

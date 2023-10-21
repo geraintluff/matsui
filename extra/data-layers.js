@@ -1,11 +1,22 @@
 (templateSet => {
 	let dataLayerPierceKey = Symbol();
-	function dataLayerProxy(data, layerData, keyFilter, singleLayer) {
+	/* keyFilter can be:
+		regex/string/non-object: converted to (k => bool)
+		
+		
+		k =>
+			bool: filters keys, and apply the same test to all (data) sub-objects
+			
+		
+	*/
+	function dataLayerProxy(data, layerData, keyFilter) {
 		if (!data || typeof data !== 'object') return data;
 		if (typeof keyFilter !== 'function') {
 			let key = keyFilter;
-			if (keyFilter instanceof RegExp) {
+			if (key instanceof RegExp) {
 				keyFilter = k => (typeof k === 'string' && key.test(k));
+			} else if (key && typeof key === 'object') {
+				keyFilter = k => ((Object.hasOwn(key, k) && key[k]) || null);
 			} else {
 				keyFilter = k => (k == key);
 			}
@@ -18,22 +29,25 @@
 		return new Proxy(data, {
 			get(obj, prop) {
 				if (prop == dataLayerPierceKey) return {m_data: data, m_layerData: layerData};
-				if (keyFilter(prop)) return layerData[prop];
+				let filterResult = keyFilter(prop);
+				if (filterResult === true) return layerData[prop];
+				if (filterResult === false) filterResult = keyFilter;
 				let subData = obj[prop];
-				if (!subData || typeof subData !== 'object') return subData;
+				if (!subData || typeof subData !== 'object' || !filterResult) return subData;
 				if (!(prop in layerData)) layerData[prop] = {};
-				return singleLayer ? subData : dataLayerProxy(subData, layerData[prop], keyFilter);
+				return dataLayerProxy(subData, layerData[prop], filterResult);
 			},
 			set(obj, prop, value) {
+				if (keyFilter(prop) === true) {
+					layerData[prop] = value;
+					return true;
+				}
 				let layeredValue = value && value[dataLayerPierceKey];
 				if (layeredValue) {
 					layerData[prop] = layeredValue.m_layerData;
 					value = layeredValue.m_data;
 				}
-				if (keyFilter(prop)) {
-					layerData[prop] = value;
-					return true;
-				}
+				if (prop in layerData) delete layerData[prop]; // overwriting data layer removes the extra layer as well
 				return Reflect.set(obj, prop, value);
 			},
 			deleteProperty(obj, prop) {
@@ -56,7 +70,7 @@
 
 			binding.updates = [data => {
 				let dataMerge = Matsui.merge.getHidden(data);
-				latestLayeredData = dataLayerProxy(data, layerData, layerKey);
+				latestLayeredData = dataLayerProxy(data, layerData, layerKey, []);
 				let withMerge = Matsui.merge.addHidden(latestLayeredData, dataMerge);
 				combined(withMerge);
 			}];

@@ -35,27 +35,39 @@ self.Matsui = (() => {
 
 	/*--- JSON Patch Merge stuff ---*/
 
-	// Attach a hidden merge to data, which use later to decide what to re-render
+	// Attach a hidden merge to data, which we use later to decide what to re-render
 	let hiddenMergeKey = Symbol(), hiddenMergePierceKey = Symbol();
-	let noChangeSymbol = Symbol('no change');
+	let noChangeSymbol = Symbol('no change'), isReplacementKey = Symbol('replace');
 
 	let merge = {
-		apply(value, mergeValue, keepNulls) {
+		apply(value, mergeValue, valueIsMerge) {
 			// simple types are just overwritten
-			if (!isObject(value) || !isObject(mergeValue)) return mergeValue;
+			if (!isObject(mergeValue)) return mergeValue;
+			if (!isObject(value)) {
+				if (valueIsMerge) mergeValue[isReplacementKey] = true;
+				return mergeValue;
+			}
 			// Arrays overwrite everything
 			if (Array.isArray(mergeValue)) return mergeValue;
+			
+			if (mergeValue[isReplacementKey]) {
+				if (valueIsMerge) {
+					value[isReplacementKey] = true;
+				} else {
+					delete mergeValue[isReplacementKey];
+				}
+			}
 
 			// They're both objects: mergey-merge
 			Object.keys(mergeValue).forEach(key => {
 				let childMerge = mergeValue[key];
 				if (Object.hasOwn(value, key)) {
-					if (childMerge == null && !keepNulls) {
+					if (childMerge == null && !valueIsMerge) {
 						delete value[key];
 					} else {
-						value[key] = merge.apply(value[key], childMerge, keepNulls);
+						value[key] = merge.apply(value[key], childMerge, valueIsMerge);
 					}
-				} else if (childMerge != null || keepNulls) { // deliberately matching both null/undefined
+				} else if (childMerge != null || valueIsMerge) { // deliberately matching both null/undefined
 					value[key] = childMerge;
 				}
 			});
@@ -63,7 +75,11 @@ self.Matsui = (() => {
 		},
 		make(fromValue, toValue, canBeUndefined) {
 			if (canBeUndefined && fromValue === toValue) return;
-			if (!isObject(toValue) || !isObject(fromValue)) return toValue;
+			if (!isObject(toValue)) return toValue;
+			if (!isObject(fromValue)) {
+				toValue[isReplacementKey] = true;
+				return toValue;
+			}
 			if (Array.isArray(toValue)) return toValue;
 
 			let mergeObj = {};
@@ -129,8 +145,9 @@ self.Matsui = (() => {
 				set(obj, prop, value, proxy) {
 					if (value == null) return (delete proxy[prop]);
 					value = getRaw(value);
-					let propMerge = merge.make(obj[prop], value, true);
-					if (typeof propMerge === 'undefined') return true; // === match, do nothing
+					if (value === obj[prop]) return true;
+					let propMerge = merge.make(obj[prop], value);
+					if (isObject(propMerge)) propMerge[isReplacementKey] = true;
 					if (Reflect.set(obj, prop, value)) {
 						updateFn({[prop]: propMerge});
 						return true;
@@ -165,7 +182,7 @@ self.Matsui = (() => {
 		},
 		getHidden(data, noChange) {
 			if (!isObject(data)) return data;
-			let mergeObj = data[hiddenMergeKey];
+			let mergeObj = getRaw(data[hiddenMergeKey]);
 			if (typeof mergeObj == 'undefined') return data;
 			if (mergeObj === noChangeSymbol) return noChange;
 			return mergeObj;
@@ -179,7 +196,7 @@ self.Matsui = (() => {
 	/*--- Access-tracking ---*/
 	
 	let pierceKey = Symbol(), silentPierceKey = Symbol();
-	let accessedKey = Symbol("accessed");
+	let accessedKey = Symbol("accessed"), listKeysKey = Symbol('list-keys');
 	let access = {
 		tracked(data, trackerObj) {
 			if (!isObject(data)) {
@@ -197,7 +214,7 @@ self.Matsui = (() => {
 						trackerObj[accessedKey] = accessedKey;
 						return data;
 					} else if (isArray && prop === 'length') {
-						trackerObj[accessedKey] = accessedKey;
+						trackerObj[listKeysKey] = listKeysKey;
 						return value;
 					} else if (typeof value === 'function' && !value.prototype) {
 						trackerObj[accessedKey] = accessedKey; // arrow functions, bound functions, and some native methods have no .prototype - more likely to not go through 'this' if they access stuff
@@ -208,7 +225,7 @@ self.Matsui = (() => {
 					return access.tracked(value, trackerObj[prop]);
 				},
 				ownKeys(obj) { // We're being asked to list our keys - assume this means they're interested in the whole object (including key addition and deletion)
-					trackerObj[accessedKey] = accessedKey;
+					trackerObj[listKeysKey] = listKeysKey;
 					return Reflect.ownKeys(obj);
 				}
 			});
@@ -235,7 +252,7 @@ self.Matsui = (() => {
 
 		let prevData = null;
 		let result = data => {
-			data = access.pierce(data);
+			data = access.pierce(data); // monitor changes
 			
 			let withoutMerge = merge.withoutHidden(data); // strip the merge info, which should force a full render
 			let rawData = getRaw(withoutMerge); // strip all proxies to try and get a uniquely identifiable object
@@ -250,19 +267,25 @@ self.Matsui = (() => {
 				return;
 			}
 			
+			// can't use data, because this is called post-merge
 			function didAccess(trackerObj, mergeValue) {
 				if (mergeValue == noChangeSymbol) return false;
 				if (trackerObj[accessedKey]) return true;
-				if (!isObject(mergeValue) || Array.isArray(mergeValue)) return true;
-				return Object.keys(mergeValue).some(key => {
-					return trackerObj[key]
-						&& didAccess(trackerObj[key], mergeValue[key]);
-				});
+				if (!isObject(mergeValue) || Array.isArray(mergeValue) || mergeValue[isReplacementKey]) return true;
+				if (trackerObj[listKeysKey]) {
+					return Object.keys(mergeValue).some(key => {
+						return didAccess(trackerObj[key] || {}, mergeValue[key]);
+					});
+				} else {
+					return Object.keys(mergeValue).some(key => {
+						return trackerObj[key] && didAccess(trackerObj[key], mergeValue[key]);
+					});
+				}
 			}
 			let mergeValue = merge.getHidden(data, noChangeSymbol /* re-use it because why not */);
 
 			updateFunctions.forEach((fn, index) => {
-				if (didAccess(updateAccess[index], mergeValue)) {
+				if (didAccess(updateAccess[index], mergeValue, data)) {
 					let trackerObj = updateAccess[index] = {};
 					let tracked = access.tracked(data, trackerObj, index);
 					fn(tracked);
@@ -318,6 +341,7 @@ self.Matsui = (() => {
 			}
 			
 			if (error) {
+				console.error(error);
 				result.push(`{${error.message}}`);
 				return result.join("");
 			} else {
@@ -516,7 +540,7 @@ self.Matsui = (() => {
 						updates.push(data => {
 							latestData = data;
 							if (maybeUpdate) maybeUpdate(data);
-							latestData = merge.withoutHidden(data);
+							latestData = merge.withoutHidden(access.pierce(data, true));
 						});
 					}
 				};
@@ -1081,8 +1105,11 @@ self.Matsui = (() => {
 			},
 			set(newData) {
 				let mergeObj = merge.make(data, newData);
+				// DEBUG: showing this works
+				if (isObject(mergeObj)) mergeObj[isReplacementKey] = true; // it's a full replacement
 				setData(newData);
 				sendUpdate(mergeObj, true);
+				if (isObject(mergeObj)) delete mergeObj[isReplacementKey];
 			}
 		});
 		// Make changes to the data
