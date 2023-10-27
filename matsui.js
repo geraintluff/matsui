@@ -1163,6 +1163,7 @@ self.Matsui = (() => {
 		merge: merge,
 		access: access,
 		combineUpdates: combineUpdates,
+		getRaw: getRaw,
 
 		global: globalSet,
 		scoped: scoped,
