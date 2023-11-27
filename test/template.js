@@ -68,16 +68,17 @@ Test("list", (api, pass, fail, assert) => {
 	applyMerge(null);
 	assert(container.innerHTML === '');
 
-	/*
 	applyMerge({foo: 'bar', bing: 'baz'});
-	assert(container.innerHTML === '<div>foo:bar</div><div>bing:baz</div>');
+	assert(container.innerHTML === '<div>bar</div><div>baz</div>');
 
 	applyMerge({bip: 'zap'});
-	assert(container.innerHTML === '<div>foo:bar</div><div>bing:baz</div><div>bip:zap</div>');
+	assert(container.innerHTML === '<div>bar</div><div>baz</div><div>zap</div>');
+
+	applyMerge({foo: 'BAR'});
+	assert(container.innerHTML === '<div>BAR</div><div>baz</div><div>zap</div>');
 
 	applyMerge({foo: null});
-	assert(container.innerHTML === '<div>bing:baz</div><div>bip:zap</div>');
-	*/
+	assert(container.innerHTML === '<div>baz</div><div>zap</div>');
 
 	pass();
 

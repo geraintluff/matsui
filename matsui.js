@@ -934,7 +934,7 @@ self.Matsui = (() => {
 		let fragment = document.createDocumentFragment();
 		let separators = [makePlaceholderNode()];
 		fragment.appendChild(separators[0]);
-		let updateList, updateObj;
+		let updateList, prevKeys;
 
 		let pop = () => {
 			let before = separators[separators.length - 2];
@@ -945,7 +945,7 @@ self.Matsui = (() => {
 		let clear = () => {
 			while (separators.length > 1) pop();
 			updateList = null;
-			updateObj = null;
+			prevKeys = null;
 		};
 		let addSeparator = () => {
 			let sep = makePlaceholderNode();
@@ -961,10 +961,30 @@ self.Matsui = (() => {
 				let mergeValue = merge.getHidden(data, noChangeSymbol);
 				if (mergeValue === noChangeSymbol) return;
 				
-				if (Array.isArray(data)) {
-					if (!updateList) {
-						clear();
-						updateList = [];
+				if (isObject(data)) {
+					if (Array.isArray(data)) {
+						if (!updateList || prevKeys) {
+							clear();
+							updateList = [];
+						}
+					} else { // TODO: this completely re-renders all later items if a key is removed
+						let keys = Object.keys(data);
+						data = keys.map(k => data[k]);
+
+						if (!updateList || !prevKeys) {
+							clear();
+							updateList = [];
+						} else {
+							let diffIndex = 0;
+							while (diffIndex < prevKeys.length && keys[diffIndex] == prevKeys[diffIndex]) {
+								++diffIndex;
+							}
+							while (updateList.length > diffIndex) {
+								pop();
+								updateList.pop();
+							}
+						}
+						prevKeys = keys;
 					}
 					
 					// remove old entries
@@ -972,19 +992,23 @@ self.Matsui = (() => {
 						pop();
 						updateList.pop();
 					}
+					// update existing entries
+					updateList.forEach((update, index) => {
+						let dataKey = prevKeys ? prevKeys[index] : index;
+						if (dataKey in mergeValue) update(data[index]);
+					});
 					// add new entries
 					while (updateList.length < data.length) {
+						let index = updateList.length;
+						
 						let endSep = addSeparator();
 						let binding = innerTemplate(globalSet.named.json);
 						endSep.before(binding.node);
-						updateList.push(combineUpdates(binding.updates));
+						let update = combineUpdates(binding.updates);
+						updateList.push(update);
+						
+						update(data[index]);
 					}
-					// update everything
-					updateList.forEach((update, index) => {
-						if (index in mergeValue) update(data[index]);
-					});
-				} else if (isObject(data)) {
-					throw Error("not implemented: object lists");
 				} else {
 					clear();
 				}
