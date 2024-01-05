@@ -283,11 +283,22 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		}
 	};
 	let templateSet = Matsui.global.extend();
-	templateSet.attributes.assertNumber = (node, valueFn) => {
+	templateSet.attributes.assertNumber = (node, valueFn, getLatest) => {
+		assert(getLatest() === null); // no data yet
 		return data => {
+			assert(getLatest() === data);
 			let value = valueFn(data);
 			assert(typeof value === 'number');
 			node.x_value = value;
+		};
+	};
+	templateSet.attributes.assertConstant = (node, value, getLatest) => {
+		assert(getLatest() === null); // no data yet
+		assert(typeof value === 'string');
+		return data => {
+			assert(getLatest() === data);
+			assert(typeof value === 'string');
+			node.x_literal = value;
 		};
 	};
 
@@ -298,6 +309,8 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		<div class="baz" $title="!${d => d.baz.toLowerCase()}?" data-other="${d=>d}">$: ${d => 5} :$</div>
 		<!-- attributes with just a single entry aren't converted to strings -->
 		<div class="bing" $assert-number="${d=>d.bing.length}">#${d=>d.bing.length*2}#</div>
+		<!-- constant attributes are returned as-is -->
+		<div class="bip" $assert-constant="literal">literal</div>
 
 		<template name="uppercase">${data => data.toUpperCase()}</template>
 		<div class="upper-foo">$uppercase{foo}</div>
@@ -310,6 +323,8 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		<div class="baz" $title="!${d => d.baz.toLowerCase()}?" data-other="${d=>d}">$: ${d => 5} :$</div>
 		<!-- attributes with just a single entry aren't converted to strings -->
 		<div class="bing" $assert-number="${d=>d.bing.length}">#${d=>d.bing.length*2}#</div>
+		<!-- constant attributes are returned as-is -->
+		<div class="bip" $assert-constant="literal">literal</div>
 
 		<template name="uppercase">${data => data.toUpperCase()}</template>
 		<div class="upper-foo">$uppercase{foo}</div>
@@ -341,6 +356,9 @@ Test("parse from tag", (api, pass, fail, assert) => {
 		
 		assert(binding.node.querySelector('.upper-foo').innerHTML == 'string:_FOO_');
 		assert(binding.node.querySelector('.upper-bar').innerHTML == 'string:_BAR_');
+
+		assert(binding.node.querySelector('.bip').innerHTML === 'literal');
+		assert(binding.node.querySelector('.bip').x_literal === 'literal');
 	}
 
 	testTemplate(tagTemplate);

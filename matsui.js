@@ -412,11 +412,25 @@ self.Matsui = (() => {
 			node.addEventListener(attrKey, e => handler(e, node));
 		} else if (attrKey in node) {
 			return d => {
-				node[attrKey] = handler();
+				let v = handler();
+				try {
+					node[attrKey] = v;
+				} catch (e) { // Write-only attributes will throw on assignment, so we fall back to attributes
+					if (v == null) {
+						node.removeAttribute(attrKey);
+					} else {
+						node.setAttribute(attrKey, v);
+					}
+				}
 			};
 		} else {
 			return d => {
-				node.setAttribute(attrKey, handler());
+				let v = handler();
+				if (v == null) {
+					node.removeAttribute(attrKey);
+				} else {
+					node.setAttribute(attrKey, v);
+				}
 			};
 		}
 	}
@@ -520,22 +534,25 @@ self.Matsui = (() => {
 			if (attr.name[0] != '$') return;
 			node.removeAttribute(attr.name);
 			let attrKey = getAttrKey(attr.name);
-			let getDataFn = attributeValueToDataFn(attr.value);
+			let getAttrFn = attributeValueToDataFn(attr.value);
 
 			setupTemplateSet.push((templateSet, placeholderMap) => {
-				let data = getDataFn(placeholderMap);
-				let dataFn = (typeof data === 'function') ? data : (_ => data);
+				let attr = getAttrFn(placeholderMap);
+				let attrIsFn = (typeof attr === 'function');
 				return {
 					m_nodePath: nodePath,
 					m_fn: (node, updates, innerTemplate) => {
 						let latestData = null;
-						let valueFn = (...args) => dataFn(latestData, ...args);
+						let getLatest = () => latestData;
+						// If the attribute is a function, bind the latest data as the first argument
+						let boundAttr = attrIsFn ? (...args) => attr(latestData, ...args) : attr;
 
 						let maybeUpdate;
 						if (attrKey in templateSet.attributes) {
-							maybeUpdate = templateSet.attributes[attrKey](node, valueFn);
+							maybeUpdate = templateSet.attributes[attrKey](node, boundAttr, getLatest);
 						} else {
-							maybeUpdate = defaultAttributeFunction(node, attrKey, valueFn);
+							let attrFn = attrIsFn ? boundAttr : () => attr;
+							maybeUpdate = defaultAttributeFunction(node, attrKey, attrFn);
 						}
 						updates.push(data => {
 							latestData = data;
@@ -552,6 +569,9 @@ self.Matsui = (() => {
 				walkTextNode(templateNode, nodePath);
 			} else if (templateNode.nodeType === 1) {
 				if (isTemplate(templateNode) && nodePath.length) { // render template in-place (if it's not the top-level element)
+					if (templateNode.tagName == 'TEMPLATE' && templateNode.hasAttribute('name')) {
+						throw Error('<template name=""> can only be immediate child');
+					}
 					let subMapKey = templateNode[subTemplatePlaceholderKey];
 					let pendingTemplate = getPendingTemplate(templateNode);
 					setupTemplateSet.push((templateSet, placeholderMap) => {

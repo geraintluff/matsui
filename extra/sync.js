@@ -54,7 +54,7 @@ Matsui.merge.apply(Matsui.Wrapped.prototype, {
 			let result = path + (queryString && '?') + queryString;
 
 			let historyState = Matsui.getRaw(Matsui.access.pierce(syncTarget.state));
-			historyState = JSON.parse(JSON.stringify(historyState));
+			historyState = historyState && JSON.parse(JSON.stringify(historyState));
 			// Creates history if the path changes, but not if it's just the query
 			let newEntry = (result != fragment) && (fragment.replace(/\?.*/, '') != path);
 			if (newEntry) {
