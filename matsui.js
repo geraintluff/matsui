@@ -1,5 +1,7 @@
 "use strict"
 self.Matsui = (() => {
+	let errors = [];
+
 	let isObject = data => (data && typeof data === 'object');
 	let makePlaceholderNode = () => document.createTextNode("");
 	function clearBetween(before, after) {
@@ -426,9 +428,9 @@ self.Matsui = (() => {
 		} else {
 			return d => {
 				let v = handler();
-				if (v == null) {
+				if (v == null && node.hasAttribute(attrKey)) {
 					node.removeAttribute(attrKey);
-				} else {
+				} else if (node.getAttribute(attrKey) != v) {
 					node.setAttribute(attrKey, v);
 				}
 			};
@@ -533,7 +535,8 @@ self.Matsui = (() => {
 		function walkAttribute(node, attr, nodePath) {
 			if (attr.name[0] != '$') return;
 			node.removeAttribute(attr.name);
-			let attrKey = getAttrKey(attr.name);
+			let literalName = attr.name[1] == '-';
+			let attrKey = literalName ? attr.name.slice(2) : getAttrKey(attr.name);
 			let getAttrFn = attributeValueToDataFn(attr.value);
 
 			setupTemplateSet.push((templateSet, placeholderMap) => {
@@ -548,7 +551,16 @@ self.Matsui = (() => {
 						let boundAttr = attrIsFn ? (...args) => attr(latestData, ...args) : attr;
 
 						let maybeUpdate;
-						if (attrKey in templateSet.attributes) {
+						if (literalName) {
+							maybeUpdate = d => {
+								let v = attrIsFn ? boundAttr() : attr;
+								if (v == null) {
+									node.removeAttribute(attrKey);
+								} else {
+									node.setAttribute(attrKey, v);
+								}
+							};
+						} else if (attrKey in templateSet.attributes) {
 							maybeUpdate = templateSet.attributes[attrKey](node, boundAttr, getLatest);
 						} else {
 							let attrFn = attrIsFn ? boundAttr : () => attr;
@@ -1131,7 +1143,7 @@ self.Matsui = (() => {
 		this.addUpdates = (updates, notifyExternal) => {
 			let combined = combineUpdates([].concat(updates));
 			this.trackMerges(mergeObj => {
-				let withMerge = Matsui.merge.addHidden(mergeTracked, mergeObj);
+				let withMerge = merge.addHidden(mergeTracked, mergeObj);
 				combined(withMerge);
 			}, notifyExternal);
 			combined(mergeTracked);
@@ -1203,6 +1215,8 @@ self.Matsui = (() => {
 		};
 	}
 	
+	errors = new Wrapped(errors, true);
+	
 	let api = {
 		merge: merge,
 		access: access,
@@ -1211,6 +1225,7 @@ self.Matsui = (() => {
 
 		global: globalSet,
 		scoped: scoped,
+		errors: errors,
 
 		Wrapped: Wrapped,
 		wrap(data, synchronous) {
