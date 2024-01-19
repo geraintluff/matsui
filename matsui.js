@@ -1,5 +1,9 @@
 "use strict"
 self.Matsui = (() => {
+	if (!Object.hasOwn) {
+		Object.hasOwn = (o, p) => Object.prototype.hasOwnProperty.call(o, p);
+	}
+	
 	let errors = [];
 
 	let isObject = data => (data && typeof data === 'object');
@@ -304,8 +308,11 @@ self.Matsui = (() => {
 		let named = ids.map(name => {
 			let template = templateSet.named[name];
 			if (template) return template;
-			console.error("Template not found: " + name);
-			return templateSet.dynamic;
+			let message = "Template not found: " + name;
+			console.error(message);
+			return _ => {
+				return {node: document.createTextNode(message), updates: []};
+			};
 		});
 		function getTemplate(depth) {
 			if (depth >= ids.length) return innerTemplate;
