@@ -393,15 +393,20 @@ self.Matsui = (() => {
 			let key = plainOrPlaceholder.slice(1, -1);
 			if (plainOrPlaceholder[0] == '{') {
 				if (key == '=') {
-					parts[i] = (pMap => d => d);
+					parts[i] = (() => d => d);
 				} else {
 					let keyPath = key.split('.');
-					parts[i] = pMap => d => {
-						keyPath.forEach(key => {
-							if (d && typeof d == 'object') d = d[key];
-						});
-						return d;
-					};
+					if (keyPath.length == 1) {
+						keyPath = keyPath[0];
+						parts[i] = () => d => d?.[keyPath];
+					} else {
+						parts[i] = () => d => {
+							keyPath.forEach(key => {
+								if (d && typeof d == 'object') d = d[key];
+							});
+							return d;
+						};
+					}
 				}
 			} else {
 				parts[i] = (pMap => pMap[key]);
