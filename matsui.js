@@ -231,10 +231,10 @@ self.Matsui = (() => {
 					let value = obj[prop];
 					if (prop == rawKey) return obj;
 					if (prop == silentPierceKey) {
-						return data;
+						return obj;
 					} else if (prop == pierceKey) {
 						trackerObj[accessedKey] = accessedKey;
-						return data;
+						return obj;
 					} else if (isArray && prop === 'length') {
 						trackerObj[listKeysKey] = listKeysKey;
 						return value;
@@ -262,10 +262,18 @@ self.Matsui = (() => {
 	/*--- Combining updates ---*/
 
 	let isCombinedKey = Symbol();
-	let combineUpdates = updateFunctions => {
-		if (updateFunctions.length === 1 && updateFunctions[0][isCombinedKey]) {
-			// Already a list with just a single combined function
-			return updateFunctions[0];
+	let combineUpdates = (updateFunctions, mapFn) => {
+		for (let i = 0; i < updateFunctions.length; ++i) {
+			if (updateFunctions[i][isCombinedKey]) {
+				// reduce recursion by replacing the already-combined updates with its component parts
+				updateFunctions.splice(i, 1, ...updateFunctions[i][isCombinedKey]);
+				--i;
+			}
+		}
+		if (mapFn) {
+			// Call the mapping function repeatedly - if we don't do this, the access-tracking doesn't realise we're using bits of the data
+			// TODO: it would be great to be able to cache this, but we'd need the caching function to add its access pattern to all the subsequent ones as well - in a way which can be picked up by the flattening above
+			updateFunctions = updateFunctions.map(fn => data => fn(mapFn(data)));
 		}
 		Object.freeze(updateFunctions);
 		let firstRun = true;
@@ -273,17 +281,18 @@ self.Matsui = (() => {
 		let updateAccess = [];
 
 		let prevData = null;
-		let result = data => {
-			data = access.pierce(data); // monitor changes
+		let combinedUpdate = data => {
+			data = access.pierce(data); // stops tracking here, and registers this function for all updates
 			
 			let withoutMerge = merge.withoutHidden(data); // strip the merge info, which should force a full render
 			let rawData = getRaw(withoutMerge); // strip all proxies to try and get a uniquely identifiable object
+
 			if (firstRun || prevData !== rawData) { // run everything the first time
 				prevData = isObject(rawData) ? rawData : null;
 				firstRun = false;
 				updateFunctions.forEach((fn, index) => {
 					let trackerObj = updateAccess[index] = {};
-					let tracked = access.tracked(withoutMerge, trackerObj);
+					let tracked = access.tracked(withoutMerge, trackerObj); // no merge data -> should force a full render
 					fn(tracked);
 				});
 				return;
@@ -295,27 +304,27 @@ self.Matsui = (() => {
 				if (trackerObj[accessedKey]) return true;
 				if (!isObject(mergeValue) || Array.isArray(mergeValue) || mergeValue[isReplacementKey]) return true;
 				if (trackerObj[listKeysKey]) {
-					return Object.keys(mergeValue).some(key => {
-						return didAccess(trackerObj[key] || {}, mergeValue[key]);
-					});
+					for (let key in mergeValue) {
+						if (didAccess(trackerObj[key] || {}, mergeValue[key])) return true;
+					}
 				} else {
-					return Object.keys(mergeValue).some(key => {
-						return trackerObj[key] && didAccess(trackerObj[key], mergeValue[key]);
-					});
+					for (let key in mergeValue) {
+						if (trackerObj[key] && didAccess(trackerObj[key], mergeValue[key])) return true;
+					}
 				}
 			}
 			let mergeValue = merge.getHidden(data, noChangeSymbol /* re-use it because why not */);
 
 			updateFunctions.forEach((fn, index) => {
-				if (didAccess(updateAccess[index], mergeValue, data)) {
+				if (didAccess(updateAccess[index], mergeValue)) {
 					let trackerObj = updateAccess[index] = {};
 					let tracked = access.tracked(data, trackerObj, index);
 					fn(tracked);
 				}
 			});
 		};
-		result[isCombinedKey] = isCombinedKey;
-		return result;
+		combinedUpdate[isCombinedKey] = updateFunctions;
+		return combinedUpdate;
 	}
 
 	/*--- HTML template ---*/
@@ -531,15 +540,13 @@ self.Matsui = (() => {
 							if (prefixString) node.before(prefixString);
 							
 							let binding = instantiateTemplateWithIds(templateSet, ids, innerTemplate);
-							let combined = combineUpdates(binding.updates);
 							node.before(binding.node);
 
 							if (typeof value == 'function') {
-								updates.push(data => {
-									combined(value(data));
-								});
+								updates.push(combineUpdates(binding.updates, value));
 							} else {
-								combined(value);
+								// The value is constant, just run all the updates immediately
+								binding.updates.forEach(fn => fn(value));
 							}
 						}
 					};
@@ -747,8 +754,8 @@ self.Matsui = (() => {
 					currentTemplate = this.getForData(data, currentFilterObj);
 					let binding = currentTemplate(innerTemplate || this.dynamic);
 					currentUpdates = combineUpdates(binding.updates);
-					currentUpdates(data);
 					clearable.m_replace(binding.node);
+					currentUpdates(data);
 				};
 
 				return {node: clearable.m_node, updates: [update]};
@@ -1060,12 +1067,12 @@ self.Matsui = (() => {
 					while (updateList.length < data.length) {
 						let index = updateList.length;
 						
-						let endSep = addSeparator();
 						let binding = innerTemplate(innerTemplate);
+						let endSep = addSeparator();
 						endSep.before(binding.node);
+
 						let update = combineUpdates(binding.updates);
 						updateList.push(update);
-						
 						update(data[index]);
 					}
 				} else {
@@ -1079,10 +1086,7 @@ self.Matsui = (() => {
 		if (typeof dataFn != 'function') throw Error("needs a data-function argument");
 		return innerTemplate => {
 			let binding = template(innerTemplate);
-			let combined = combineUpdates(binding.updates);
-			binding.updates = [data => {
-				combined(dataFn(data));
-			}];
+			binding.updates = [combineUpdates(binding.updates, dataFn)];
 			return binding;
 		};
 	};
@@ -1106,8 +1110,8 @@ self.Matsui = (() => {
 							conditionalUpdates(data);
 						} else {
 							let binding = conditionalTemplate(innerTemplate);
-							conditionalUpdates = combineUpdates(binding.updates);
 							clearable.m_replace(binding.node);
+							conditionalUpdates = combineUpdates(binding.updates);
 							conditionalUpdates(data);
 						}
 					} else {
@@ -1168,12 +1172,12 @@ self.Matsui = (() => {
 			return this;
 		};
 		this.addUpdates = (updates, notifyExternal) => {
-			let combined = combineUpdates([].concat(updates));
+			updates = [].concat(updates);
 			this.trackMerges(mergeObj => {
 				let withMerge = merge.addHidden(mergeTracked, mergeObj);
-				combined(withMerge);
+				updates.forEach(fn => fn(withMerge));
 			}, notifyExternal);
-			combined(mergeTracked);
+			updates.forEach(fn => fn(mergeTracked));
 		};
 
 		let setData = newData => {
@@ -1221,6 +1225,11 @@ self.Matsui = (() => {
 			if (!template) template = templateSet.fromElement(host);
 
 			let bindingInfo = template(templateSet.dynamic);
+			let combined = combineUpdates(bindingInfo.updates);
+			this.trackMerges(mergeObj => {
+				let withMerge = merge.addHidden(mergeTracked, mergeObj);
+				combined(withMerge);
+			}, true);
 			this.addUpdates(bindingInfo.updates, true); // watch for .setData() and .merge() as well
 			
 			let node = bindingInfo.node;

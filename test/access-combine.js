@@ -213,7 +213,8 @@ Test("combining a combined update", (api, pass, fail, assert) => {
 	assert(updateCount === 2);
 	
 	let combined2 = api.combineUpdates([combined]);
-	assert(combined2 === combined); // it shouldn't wrap it twice
+	// We removed this in favour of inlining all combined updates into the outer one
+	//assert(combined2 === combined); // it shouldn't wrap it twice
 	combined2();
 	assert(updateCount === 3);
 
@@ -261,6 +262,54 @@ Test("deleting a sub-object", (api, pass, fail, assert) => {
 	}
 	assert(didThrow); // it called the update, and failed to access data.foo.bar
 	assert(updateCount === 3); // so didn't get to the following statement
+
+	pass();
+});
+
+Test("combining updates with a mapping function", (api, pass, fail, assert) => {
+	let updateCount = 0;
+	let mapCount = 0; // TODO: we removed this check because we currently call the mapping function separately for each sub-update, but it would be better to cache it, if we can figure out how to tell the access-tracking about it
+	let dataMap = data => {
+		++mapCount;
+		return {foo: data.foo, bar: data.bar.toUpperCase()};
+	};
+	
+	let updates = [
+		data => {
+			assert(data.foo == 'foo');
+			assert(data.bar == 'BAR', "not mapped (BAR)");
+			assert(Object.keys(data).length === 2, "mapped data has two keys");
+		},
+		data => {
+			assert(data.foo == 'foo');
+			assert(data.bar == 'BAR', "not mapped (BAR)");
+			assert(Object.keys(data).length === 2, "mapped data has two keys");
+
+			updateCount++;
+		}
+	];
+	
+	let refData = {foo: 'foo', bar: 'bar', baz: 'bing'};
+	
+	let combined = api.combineUpdates(updates, dataMap);
+	assert(combined !== updates[0]);
+	combined(refData);
+	assert(updateCount === 1, "updateCount = 1");
+	//assert(mapCount === 1, "mapCount = 1");
+	refData.baz = 'boop'; // ignored
+	combined(refData);
+	assert(updateCount === 2, "updateCount = 2");
+	//assert(mapCount === 2, "mapCount = 2");
+	
+	let secondUpdateCount = 0;
+	let combined2 = api.combineUpdates([combined, data => {
+		assert(api.getRaw(data) == refData, "secondary update should not be mapped");
+		++secondUpdateCount;
+	}]);
+	combined2(refData);
+	assert(updateCount === 3, "updateCount = 3");
+	//assert(mapCount === 3, "mapCount = 3");
+	assert(secondUpdateCount === 1, "secondUpdateCount = 1");
 
 	pass();
 });
