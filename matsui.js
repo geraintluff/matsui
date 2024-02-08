@@ -1235,7 +1235,7 @@ self.Matsui = (() => {
 				let withMerge = merge.addHidden(mergeTracked, mergeObj);
 				combined(withMerge);
 			}, true);
-			this.addUpdates(bindingInfo.updates, true); // watch for .setData() and .merge() as well
+			combined(mergeTracked);
 			
 			let node = bindingInfo.node;
 			if (replace) {
