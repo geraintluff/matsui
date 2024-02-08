@@ -110,66 +110,82 @@ self.Matsui = (() => {
 		tracked(data, updateFn, asyncUpdates) {
 			if (!isObject(data)) return data;
 			
-			if (asyncUpdates) {
-				let actualUpdateFn = updateFn;
-				let pendingMerge = null, pendingMergeTimeout = null;
-				let notifyPendingMerge = () => {
-					clearTimeout(pendingMergeTimeout);
-					if (pendingMerge != null) {
-						let merge = pendingMerge;
-						pendingMerge = null; // clear it first
-						actualUpdateFn(merge);
-					}
+			let actualUpdateFn = updateFn;
+			let isRunning = false;
+			let pendingMerge = noChangeSymbol, pendingMergeTimeout = null;
+			let notifyPendingMerge = () => {
+				clearTimeout(pendingMergeTimeout);
+				if (pendingMerge != noChangeSymbol) {
+					let merge = pendingMerge;
+					pendingMerge = noChangeSymbol; // clear it first
+					actualUpdateFn(merge);
 				}
-				updateFn = mergeObj => {
-					if (pendingMerge) {
-						pendingMerge = merge.apply(pendingMerge, mergeObj, true); // keep nulls because they're meaningful
-					} else {
-						pendingMerge = mergeObj;
-						requestAnimationFrame(notifyPendingMerge);
-						clearTimeout(pendingMergeTimeout);
-						pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
-					}
-				};
 			}
-			
-			return new Proxy(data, {
-				get(obj, prop) {
-					let value = obj[prop];
-					if (prop == rawKey) return obj;
-					// TODO: if it's a function without a .prototype (meaning it might be bound - see below) is there a way to let it run, but check for changes?  Or return a proxy function to do that when it's called (which could be later)?
-					// That could also check for `this` being the proxy, and (before triggering) call the actual function on `obj` instead, which would handle methods which complain when called on the proxy (like Date::toString())
-					if (!isObject(value)) return value;
-
-					return merge.tracked(
-						value,
-						mergeObj => updateFn({
-							[prop]: mergeObj
-						})
-					);
-				},
-				set(obj, prop, value, proxy) {
-					if (value == null) return (delete proxy[prop]);
-					value = getRaw(value);
-					if (value === obj[prop]) return true;
-					let propMerge = merge.make(obj[prop], value);
-					if (isObject(propMerge)) propMerge[isReplacementKey] = true;
-					if (Reflect.set(obj, prop, value)) {
-						updateFn({[prop]: propMerge});
-						return true;
-					}
-					return false;
-				},
-				deleteProperty(obj, prop) {
-					if (delete obj[prop]) {
-						updateFn({
-							[prop]: null
-						});
-						return true;
-					}
-					return false;
+			updateFn = mergeObj => {
+				if (pendingMerge == noChangeSymbol) {
+					pendingMerge = mergeObj;
+				} else {
+					pendingMerge = merge.apply(pendingMerge, mergeObj, true); // keep nulls because they're meaningful
 				}
-			});
+				if (asyncUpdates) {
+					requestAnimationFrame(notifyPendingMerge);
+					clearTimeout(pendingMergeTimeout);
+					pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
+				} else if (!isRunning) {
+					while (pendingMerge != noChangeSymbol) {
+						isRunning = true;
+						notifyPendingMerge();
+						isRunning = false;
+					}
+				}
+			};
+			
+			let trackedProxy = (data, updateFn) => {
+				return new Proxy(data, {
+					get(obj, prop) {
+						let value = obj[prop];
+						if (prop == rawKey) return obj;
+						// TODO: if it's a function without a .prototype (meaning it might be bound - see below) is there a way to let it run, but check for changes?  Or return a proxy function to do that when it's called (which could be later)?
+						// That could also check for `this` being the proxy, and (before triggering) call the actual function on `obj` instead, which would handle methods which complain when called on the proxy (like Date::toString())
+						if (!isObject(value)) return value;
+
+						return trackedProxy(
+							value,
+							mergeObj => updateFn({
+								[prop]: mergeObj
+							})
+						);
+					},
+					set(obj, prop, value, proxy) {
+						if (value == null) return (delete proxy[prop]);
+						value = getRaw(value);
+						if (value === obj[prop]) return true;
+						let propMerge = merge.make(obj[prop], value);
+						if (isObject(propMerge)) {
+							propMerge[isReplacementKey] = true;
+						} else {
+							// no change
+							if (value === obj[prop]) return true;
+						}
+						if (Reflect.set(obj, prop, value)) {
+							updateFn({[prop]: propMerge});
+							return true;
+						}
+						return false;
+					},
+					deleteProperty(obj, prop) {
+						if (!(prop in obj)) return true;
+						if (delete obj[prop]) {
+							updateFn({
+								[prop]: null
+							});
+							return true;
+						}
+						return false;
+					}
+				});
+			};
+			return trackedProxy(data, updateFn);
 		},
 		addHidden(data, mergeObj) {
 			if (!isObject(data)) return data;
@@ -768,8 +784,12 @@ self.Matsui = (() => {
 			if (typeof list === 'string') list = document.querySelectorAll(list);
 			list.forEach(child => {
 				let name = child.id || child.getAttribute('name');
+				let filter = null;
+				if (child.hasAttribute('$filter')) {
+					filter = attributeValueToDataFn(child.getAttribute('$filter'))(null);
+				}
 				if (child.tagName === 'TEMPLATE' && name) {
-					this.addElement(name, child);
+					this.addElement(name, child, filter);
 				}
 			});
 			return this;
@@ -1041,7 +1061,7 @@ self.Matsui = (() => {
 						let index = updateList.length;
 						
 						let endSep = addSeparator();
-						let binding = innerTemplate(globalSet.named.json);
+						let binding = innerTemplate(innerTemplate);
 						endSep.before(binding.node);
 						let update = combineUpdates(binding.updates);
 						updateList.push(update);

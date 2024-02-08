@@ -1,132 +1,259 @@
-(attributes => {
+let Interaction = (attributes => {
 	let doubleClickMs = 300;
-
-	/*
-	function scaleDistance(d, e) {
-		if (e.metaKey || e.shiftKey) d *= 0.2;
-		return d;
-	}
 	
-	function addKeys(element, keyMaps) {
-		if (!element.hasAttribute('tabindex')) element.setAttribute('tabindex', 0);
-		element.addEventListener('keydown', e => {
-			if (keyMaps[e.key]) {
-				e.preventDefault();
-				e.stopPropagation();
-				keyMaps[e.key](e);
-			}
-		});
-	}
-	*/
-
-	attributes.modalClose = (node, handler) => {
-		node.addEventListener('close', e => handler(e, node));
-		node.addEventListener('cancel', e => handler(e, node));
-		if (node.tagName !== 'DIALOG') {
-			node.addEventListener('keydown', e => {
-				if (e.key == 'Esc') handler(e, node);
-			});
-		}
-	};
-
-	attributes.modal = (node, handler) => {
-		if (node.tagName !== 'DIALOG') throw Error('Only use $modal on <dialog>');
-		node.addEventListener('click', e => {
-			let rect = node.getBoundingClientRect();
-			var inDialog = rect.top <= event.clientY
-				&& event.clientY <= rect.bottom
-				&& rect.left <= event.clientX
-				&& event.clientX <= rect.right;
-			if (e.target === node && !inDialog) node.close();
-		});
+	attributes['class'] = (node, dataFn) => {
+		let prev = '';
 		return data => {
-			let shouldBeOpen = handler(node);
-			if (shouldBeOpen && !node.open) {
-				node.showModal();
-			} else if (!shouldBeOpen && node.open) {
-				node.close();
+			let v = dataFn();
+			if (v != prev) {
+				(prev + "").split(/\s+/g).forEach(c => {
+					if (c) node.classList.remove(c);
+				});
+				(v + "").split(/\s+/g).forEach(c => {
+					if (c) node.classList.add(c);
+				});
+				prev = v;
 			}
 		};
 	};
 
-	attributes.press = (node, handler) => {
+	let focusStyle = document.createElement('style');
+	focusStyle.textContent = ".interaction-implicit-focus :focus {outline: none;}";
+	document.head.appendChild(focusStyle);
+	window.addEventListener('pointerdown', e => {
+		document.body.classList.add("interaction-implicit-focus");
+	}, {capture: true});
+	window.addEventListener('keydown', e => {
+		if (e.code == 'Tab') {
+			document.body.classList.remove("interaction-implicit-focus");
+		}
+	}, {capture: true});
+	window.addEventListener('keydown', e => {
+		if (e.code == 'Escape') {
+			if (!document.body.classList.contains('interaction-implicit-focus')) {
+				document.body.classList.add('interaction-implicit-focus');
+			} else {
+				e.target.blur();
+			}
+		}
+	});
+
+	function scaleDistance(d, e) {
+		if (e.ctrlKey || e.shiftKey) d *= 0.1;
+		if (e.metaKey || e.altKey) d = (d > 0) ? Infinity : (d < 0) ? -Infinity : 0;
+		return d;
+	}
+	function isPrimary(e) {
+		return !e.ctrlKey && e.button == 0;
+	}
+
+	function addKeys(element, downKeys, upKeys) {
+		if (!element.hasAttribute('tabindex')) element.setAttribute('tabindex', 0);
+		element.addEventListener('keydown', e => {
+			if (downKeys[e.key]) {
+				element.focus();
+				e.preventDefault();
+				e.stopPropagation();
+				downKeys[e.key](e);
+			}
+		});
+		if (upKeys) {
+			element.addEventListener('keyup', e => {
+				if (upKeys[e.key]) {
+					e.preventDefault();
+					e.stopPropagation();
+					upKeys[e.key](e);
+				}
+			});
+		}
+	}
+
+	attributes.value = (node, keyPath, getData) => {
+		if (typeof keyPath == 'string') {
+			keyPath = keyPath.split('.');
+			let key = keyPath.pop();
+
+			function update() {
+				let data = getData();
+				keyPath.forEach(k => data = data?.[k]);
+				if (data) data[key] = node.value;
+			}
+			node.addEventListener('input', update);
+			node.addEventListener('change', update);
+			
+			return data => {
+				keyPath.forEach(k => data = data?.[k]);
+				if (data) node.value = data[key];
+			};
+		}
+		return data => {
+			node.value = keyPath();
+		}
+	};
+
+	let moveKey = attributes.moveKey = (node, handler) => {
+		addKeys(node, {
+			ArrowDown: e => handler(0, scaleDistance(15, e), node),
+			ArrowUp: e => handler(0, scaleDistance(-15, e), node),
+			ArrowLeft: e => handler(scaleDistance(-15, e), 0, node),
+			ArrowRight: e => handler(scaleDistance(15, e), 0, node),
+			PageDown: e => handler(0, Infinity, node),
+			PageUp: e => handler(0, -Infinity, node),
+			Home: e => handler(-Infinity, 0, node),
+			End: e => handler(Infinity, 0, node)
+		});
+	};
+	
+	let supportPointerLock = true;
+	attributes.pointerLock = (node, value) => {
+		if (supportPointerLock) {
+			node._interactionPointerLock = (typeof value === 'function') ? value() : (value == "" || value);
+		}
+	};
+
+	attributes.move = (node, handler) => {
+		node.style.touchAction = "none"; // enables dragging on a touch-screen
+		
+		node.style.cursor = node.style.cursor || "grab";
+		let releaseCursor = 'grab';
+	
+		let prevX, prevY;
+		function moveHandler(e) {
+			e.preventDefault();
+			e.stopPropagation();
+			let dx = e.pageX - prevX;
+			let dy = e.pageY - prevY;
+			if (document.pointerLockElement == node) {
+				dx = e.movementX;
+				dy = e.movementY;
+			}
+			prevX = e.pageX;
+			prevY = e.pageY;
+			handler(scaleDistance(dx, e), scaleDistance(dy, e), node);
+		}
+
+		let downCount = 0;
+		node.addEventListener('pointerdown', e => {
+			if (!isPrimary(e)) return;
+			e.preventDefault();
+			e.stopPropagation();
+			node.focus();
+			prevX = e.pageX;
+			prevY = e.pageY;
+			node.setPointerCapture(e.pointerId);
+			if (node._interactionPointerLock) node.requestPointerLock();
+			if (++downCount == 1) {
+				node.addEventListener("pointermove", moveHandler);
+			}
+			releaseCursor = node.style.pointer;
+		});
+		function up(e) {
+			e.preventDefault();
+			e.stopPropagation();
+			if (document.pointerLockElement == node) document.exitPointerLock();
+			//node.releasePointerCapture(e.pointerId); // should happen automatically on pointerup
+			if (--downCount <= 0) {
+				downCount = 0;
+				node.removeEventListener("pointermove", moveHandler);
+			}
+			node.style.pointer = releaseCursor;
+		}
+		node.addEventListener('pointerup', up);
+		node.addEventListener('pointercancel', up);
+		node.addEventListener('blur', up);
+		
+		moveKey(node, handler);
+	}
+
+	attributes.scroll = (node, handler) => {
+		// TODO: use keys with Alt/Meta
+		node.addEventListener("wheel", e => {
+			e.preventDefault();
+			e.stopPropagation();
+			focus();
+			handler(scaleDistance(e.deltaX, e), scaleDistance(e.deltaY, e), node);
+		}, {capture: true});
+	};
+	
+	function press(node, handler, includeKeys) {
 		let clickCount = 0;
 		let prevDown = 0;
-		function down() {
+		let isDown = false;
+		let down = e => {
 			let now = Date.now(), diff = now - prevDown;
 			prevDown = now;
 			if (diff > doubleClickMs) clickCount = 0;
-			handler(++clickCount);
+
 			node.classList.add("interaction-press");
-		}
-		function up() {
+			if (!isDown) handler(++clickCount, e, node);
+			isDown = true;
+		};
+		let up = e => {
 			node.classList.remove("interaction-press");
-		}
+			isDown = false;
+		};
+		if (includeKeys) addKeys(node, {Enter: down, ' ': down}, {Enter: up, ' ': up});
+		node.addEventListener('blur', up);
 		node.addEventListener('pointerdown', e => {
-			if (e.button) return;
-			e.stopPropagation();
-			e.preventDefault();
+			if (!isPrimary(e)) return;
+			if (includeKeys) { // otherwise, the focus won't cascade to a parent that has key handlers
+				e.preventDefault();
+				e.stopPropagation();
+				node.focus();
+			}
 			node.setPointerCapture(e.pointerId);
-			down();
+			down(e);
 		});
 		node.addEventListener('pointerup', e => {
-			if (!e.button) up();
+			e.preventDefault();
+			e.stopPropagation();
+			up();
 		});
-
-		node.addEventListener('keydown', e => {
-			if (e.key === 'Enter') {
-				down();
-			}
-		});
-		node.addEventListener('keyup', e => {
-			if (e.key === 'Enter') {
-				up();
-			}
-		});
-		node.style.cursor = node.style.cursor || "pointer";
 	};
-	
-	// binds the input's value to some part of the data
-	attributes.inputKeypath = (node, valueFn) => {
-		let setValue;
-		let isCheckbox = (node.type == 'checkbox');
+	attributes.press = (node, handler) => press(node, handler, true);
+	attributes.unpress = (node, handler) => {
+		let start = null;
+		let down = e => {
+			start = Date.now();
+		};
+		let up = e => {
+			if (start != null) handler(e, (Date.now() - start)*0.001, node);
+			start = null;
+		};
+		addKeys(node, {Enter: down}, {Enter: up});
+		node.addEventListener('blur', up);
+		node.addEventListener('pointerdown', e => {
+			if (!isPrimary(e)) return;
+			e.preventDefault();
+			e.stopPropagation();
+			node.focus();
+			node.setPointerCapture(e.pointerId);
+			down(e);
+		});
+		node.addEventListener('pointerup', e => {
+			e.preventDefault();
+			e.stopPropagation();
+			up(e);
+		});
+	};
+	attributes.click = (node, handler) => press(node, handler, false);
 
-		node.addEventListener('input', e => {
-			if (setValue) {
-				if (isCheckbox) {
-					setValue(node.checked);
-				} else {
-					setValue(node.value);
-				}
+	attributes['delete'] = (node, handler) => {
+		node.addEventListener('keydown', e => {
+			if (e.code == 'Delete' || e.code == 'Backspace') {
+				e.preventDefault();
+				e.stopPropagation();
+				handler(e, node);
 			}
 		});
-		
-		return data => {
-			let path = valueFn();
-			if (typeof path === 'string') path = path.split('.');
-			while (path.length > 1) {
-				data = data[path.shift()];
-			}
-			
-			let key = path[0], newValue = data[key];
-			if (isCheckbox) {
-				node.checked = newValue;
-			} else if (node.value != newValue) {
-				node.value = newValue;
-				node.selectionStart = node.selectionEnd = 0;
-			}
-			setValue = v => {
-				data[key] = v;
-			};
-		};
 	};
 
 	// Enter in <input>, Shift/Meta+Enter in textarea
-	attributes.inputDone = (node, valueFn) => {
+	attributes.done = (node, valueFn) => {
 		let handler = e => {
 			e.preventDefault();
 			e.stopPropagation();
-			valueFn(node);
+			valueFn(node.value, node);
 		};
 		
 		let multiline = (node.tagName === 'TEXTAREA');
@@ -140,7 +267,27 @@
 		});
 	};
 
+	attributes.dropFileIf = (node, valueFn) => {
+		node._interactionDropIfHandler = valueFn;
+	};
+
 	attributes.dropFile = (node, valueFn) => {
+		if (valueFn == "") {
+			// walk up the tree until we find an actual handler
+			valueFn = files => {
+				let n = node.parentNode;
+				while (n) {
+					if (n._interactionDropHandler) {
+						n._interactionDropHandler(files);
+						return;
+					}
+					n = n.parentNode;
+				}
+			};
+		}
+		node._interactionDropHandler = valueFn;
+		let acceptFiles = node._interactionDropIfHandler || (x => true);
+	
 		function getFiles(e) {
 			let files = [];
 			if (e.dataTransfer.items) {
@@ -159,8 +306,11 @@
 		let currentDragTarget = null;
 		node.addEventListener('dragenter', e => {
 			currentDragTarget = e.target;
-			if (getFiles(e)) {
+			let files = getFiles(e);
+			if (files && acceptFiles(files, e)) {
 				node.classList.add("interaction-drop");
+				e.preventDefault();
+				e.stopPropagation();
 			}
 		});
 		node.addEventListener('dragleave', e => {
@@ -171,13 +321,72 @@
 		});
 		node.addEventListener('dragover', e => {
 			e.preventDefault();
+			let files = getFiles(e);
+			if (!files || !acceptFiles(files, e)) {
+				node.classList.remove("interaction-drop");
+			}
 		});
 		node.addEventListener('drop', e => {
-			e.preventDefault();
-			node.classList.remove("interaction-drop");
 			let files = getFiles(e);
-			if (files) valueFn(files);
+			node.classList.remove("interaction-drop");
+			document.querySelectorAll('.interaction-drop').forEach(n => {
+				n.classList.remove("interaction-drop");
+			});
+			if (files && acceptFiles(files, e)) {
+				e.preventDefault();
+				e.stopPropagation();
+				valueFn(files);
+			}
 		});
+		if (node.tagName == 'INPUT' && node.type == 'file') {
+			node.addEventListener('change', e => {
+				e.preventDefault();
+				let files = [].slice.call(node.files, 0);
+				if (files.length && files && acceptFiles(files, e)) {
+					valueFn(files);
+				}
+			});
+		}
 	};
 
+	attributes.dialogWhen = (node, handler) => {
+		if (node.tagName !== 'DIALOG') throw Error("only use $dialog-when on <dialog>");
+
+		// these can be closed on their own, not by touching the state - so log an error if we don't have a handler to keep it in line
+		function checkForCloseHandler() {
+			if (!node._interactionHasDialogClose) console.error("<dialog> closed with no $dialog-close to align the state")
+		}
+		node.addEventListener('close', checkForCloseHandler);
+		node.addEventListener('cancel', checkForCloseHandler);
+
+		// close by clicking outside the dialog
+		node.addEventListener('click', e => {
+			let rect = node.getBoundingClientRect();
+			var inDialog = rect.top <= event.clientY
+				&& event.clientY <= rect.bottom
+				&& rect.left <= event.clientX
+				&& event.clientX <= rect.right;
+			if (e.target === node && !inDialog) {
+				node.close();
+			}
+		}, {capture: true});
+		return data => {
+			let shouldBeOpen = typeof handler == 'function' ? handler(node) : handler;
+			if (shouldBeOpen && !node.open) {
+				node.showModal();
+			} else if (!shouldBeOpen && node.open) {
+				node.close();
+			}
+		};
+	};
+	// So you can keep the state in line when a <dialog> element is manually closed
+	attributes.dialogClose = (node, handler) => {
+		node._interactionHasDialogClose = true;
+		node.addEventListener('close', e => handler(node));
+		node.addEventListener('cancel', e => handler(node));
+	};
+	
+	return {
+		keys: addKeys
+	};
 })(Matsui.global.attributes);

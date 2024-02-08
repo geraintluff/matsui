@@ -216,8 +216,8 @@
 		</template>
 		<template @if="${d => !Array.isArray(d.input)}">
 			<textarea id="input" placeholder="JS code" autofocus
-				$input-keypath="input"
-				$input-done="${uglifyUpdate}"></textarea>
+				$value="input"
+				$done="${uglifyUpdate}"></textarea>
 		</template>
 		
 		<button id="minify-button" $click="${uglifyUpdate}">minify</button>
@@ -239,7 +239,7 @@
 				return '?';
 			}}</a></div>
 		<label id="live">
-			<input type="checkbox" $input-keypath="live">
+			<input type="checkbox" $value="live">
 			live
 		</label>
 		<pre id="output" class="language-javascript"><code $update="${(d, node) => {
@@ -248,12 +248,9 @@
 			if (text.length < 15000) Prism.highlightElement(node);
 		}}"></code></pre>
 		
-		<template @if="{optionsDialog}">
-			<dialog $modal="1" $modal-close="${d => d.optionsDialog = false}">
-				<div>Hello!
-				</div>
-			</dialog>
-		</template>
+		<dialog $dialog-when="{optionsDialog}" $dialog-close="${d => d.optionsDialog = false}">
+			<div>Options go here</div>
+		</dialog>
 
 		<!-- npx uglify-js --self --compress --mangle --output uglify.min.js -->
 		<script src="uglify.worker.js"></script>
