@@ -268,7 +268,7 @@ Test("deleting a sub-object", (api, pass, fail, assert) => {
 
 Test("combining updates with a mapping function", (api, pass, fail, assert) => {
 	let updateCount = 0;
-	let mapCount = 0; // TODO: we removed this check because we currently call the mapping function separately for each sub-update, but it would be better to cache it, if we can figure out how to tell the access-tracking about it
+	let mapCount = 0;
 	let dataMap = data => {
 		++mapCount;
 		return {foo: data.foo, bar: data.bar.toUpperCase()};
@@ -295,11 +295,11 @@ Test("combining updates with a mapping function", (api, pass, fail, assert) => {
 	assert(combined !== updates[0]);
 	combined(refData);
 	assert(updateCount === 1, "updateCount = 1");
-	//assert(mapCount === 1, "mapCount = 1");
+	assert(mapCount === 1, "mapCount = 1");
 	refData.baz = 'boop'; // ignored
 	combined(refData);
 	assert(updateCount === 2, "updateCount = 2");
-	//assert(mapCount === 2, "mapCount = 2");
+	assert(mapCount === 2, "mapCount = 2");
 	
 	let secondUpdateCount = 0;
 	let combined2 = api.combineUpdates([combined, data => {
@@ -308,7 +308,7 @@ Test("combining updates with a mapping function", (api, pass, fail, assert) => {
 	}]);
 	combined2(refData);
 	assert(updateCount === 3, "updateCount = 3");
-	//assert(mapCount === 3, "mapCount = 3");
+	assert(mapCount === 3, "mapCount = 3");
 	assert(secondUpdateCount === 1, "secondUpdateCount = 1");
 
 	pass();

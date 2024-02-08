@@ -122,11 +122,12 @@ self.Matsui = (() => {
 				}
 			}
 			updateFn = mergeObj => {
-				if (pendingMerge == noChangeSymbol) {
-					pendingMerge = mergeObj;
-				} else {
-					pendingMerge = merge.apply(pendingMerge, mergeObj, true); // keep nulls because they're meaningful
+				if (pendingMerge != noChangeSymbol) {
+					// merge the two changes, keeping nulls because they're meaningful
+					pendingMerge = merge.apply(pendingMerge, mergeObj, true);
+					return;
 				}
+				pendingMerge = mergeObj;
 				if (asyncUpdates) {
 					requestAnimationFrame(notifyPendingMerge);
 					clearTimeout(pendingMergeTimeout);
@@ -271,9 +272,8 @@ self.Matsui = (() => {
 			}
 		}
 		if (mapFn) {
-			// Call the mapping function repeatedly - if we don't do this, the access-tracking doesn't realise we're using bits of the data
-			// TODO: it would be great to be able to cache this, but we'd need the caching function to add its access pattern to all the subsequent ones as well - in a way which can be picked up by the flattening above
-			updateFunctions = updateFunctions.map(fn => data => fn(mapFn(data)));
+			let combined = combineUpdates(updateFunctions);
+			updateFunctions = [data => combined(mapFn(data))];
 		}
 		Object.freeze(updateFunctions);
 		let firstRun = true;
