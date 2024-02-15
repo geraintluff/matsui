@@ -437,10 +437,13 @@ self.Matsui = (() => {
 		};
 	}
 	function isTemplate(element) {
-		if (element.tagName == 'TEMPLATE') return true;
+		if (/^template$/i.test(element.tagName)) return true;
 		for (let attr of element.attributes || []) {
 			if (attr.name[0] == '@') return true;
 		}
+	}
+	function isScript(element) {
+		return /^script$/i.test(element.tagName); // SVG nodes preserve case, which is why we do this
 	}
 	// $dash-separated or @dash-separated => camelCase
 	function getAttrKey(attrName) {
@@ -650,7 +653,7 @@ self.Matsui = (() => {
 					});
 					templateNode.replaceWith(makePlaceholderNode());
 					return;
-				} else if (templateNode.tagName === 'SCRIPT') {
+				} else if (isScript(templateNode)) {
 					return;
 				} else {
 					for (let attr of Array.from(templateNode.attributes)) {
@@ -857,8 +860,7 @@ self.Matsui = (() => {
 							node.nodeValue = replacement;
 						}
 					} else if (node.nodeType === 1) {
-						let tagName = node.tagName;
-						if (tagName == 'SCRIPT') {
+						if (isScript(node)) {
 							if (node.getRootNode().nodeType == 11) { // document fragment (which means it's not part of the main document)
 								let placeholder = nextPlaceholder(true);
 								codeParts[placeholder] = node.textContent;
@@ -919,7 +921,7 @@ self.Matsui = (() => {
 				}
 				
 				function removeMarkedNodes(node) {
-					let text = (node.tagName == 'SCRIPT' ? node.textContent : node.nodeValue);
+					let text = (isScript(node) ? node.textContent : node.nodeValue);
 					if (regexMarkedForRemoval.test(text)) {
 						node.remove();
 					} else {
@@ -929,7 +931,7 @@ self.Matsui = (() => {
 							removeMarkedNodes(child);
 							child = next;
 						}
-						if (node.tagName == 'TEMPLATE') removeMarkedNodes(node.content);
+						if (/^template$/.test(node.tagName)) removeMarkedNodes(node.content);
 					}
 				}
 				removeMarkedNodes(content);

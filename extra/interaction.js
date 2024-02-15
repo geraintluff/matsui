@@ -76,14 +76,17 @@ let Interaction = (attributes => {
 			function update() {
 				let data = getData();
 				keyPath.forEach(k => data = data?.[k]);
-				if (data) data[key] = node.value;
+				if (data) data[key] = (typeof node.checked == 'boolean' ? node.checked : node.value);
 			}
 			node.addEventListener('input', update);
 			node.addEventListener('change', update);
 			
 			return data => {
 				keyPath.forEach(k => data = data?.[k]);
-				if (data) node.value = data[key];
+				if (data) {
+					node.value = data[key];
+					if (typeof node.checked == 'boolean') node.checked = data[key];
+				}
 			};
 		}
 		return data => {
@@ -151,7 +154,7 @@ let Interaction = (attributes => {
 			e.preventDefault();
 			e.stopPropagation();
 			if (document.pointerLockElement == node) document.exitPointerLock();
-			//node.releasePointerCapture(e.pointerId); // should happen automatically on pointerup
+			if (e.pointerId) node.releasePointerCapture(e.pointerId);
 			if (--downCount <= 0) {
 				downCount = 0;
 				node.removeEventListener("pointermove", moveHandler);
@@ -187,10 +190,14 @@ let Interaction = (attributes => {
 			node.classList.add("interaction-press");
 			if (!isDown) handler(++clickCount, e, node);
 			isDown = true;
+			if (e.pointerId) node.setPointerCapture(e.pointerId);
 		};
 		let up = e => {
+			e.preventDefault();
+			e.stopPropagation();
 			node.classList.remove("interaction-press");
 			isDown = false;
+			if (e.pointerId) node.releasePointerCapture(e.pointerId);
 		};
 		if (includeKeys) addKeys(node, {Enter: down, ' ': down}, {Enter: up, ' ': up});
 		node.addEventListener('blur', up);
@@ -201,40 +208,35 @@ let Interaction = (attributes => {
 				e.stopPropagation();
 				node.focus();
 			}
-			node.setPointerCapture(e.pointerId);
 			down(e);
 		});
-		node.addEventListener('pointerup', e => {
-			e.preventDefault();
-			e.stopPropagation();
-			up();
-		});
+		node.addEventListener('pointerup', up);
+		node.addEventListener('pointercancel', up);
 	};
 	attributes.press = (node, handler) => press(node, handler, true);
 	attributes.unpress = (node, handler) => {
 		let start = null;
 		let down = e => {
 			start = Date.now();
+			e.preventDefault();
+			e.stopPropagation();
+			if (e.pointerId) node.setPointerCapture(e.pointerId);
 		};
 		let up = e => {
+			e.preventDefault();
+			e.stopPropagation();
 			if (start != null) handler(e, (Date.now() - start)*0.001, node);
 			start = null;
+			if (e.pointerId) node.releasePointerCapture(e.pointerId);
 		};
 		addKeys(node, {Enter: down}, {Enter: up});
 		node.addEventListener('blur', up);
 		node.addEventListener('pointerdown', e => {
 			if (!isPrimary(e)) return;
-			e.preventDefault();
-			e.stopPropagation();
 			node.focus();
-			node.setPointerCapture(e.pointerId);
 			down(e);
 		});
-		node.addEventListener('pointerup', e => {
-			e.preventDefault();
-			e.stopPropagation();
-			up(e);
-		});
+		node.addEventListener('pointerup', up);
 	};
 	attributes.click = (node, handler) => press(node, handler, false);
 
