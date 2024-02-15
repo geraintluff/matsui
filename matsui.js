@@ -1210,10 +1210,10 @@ self.Matsui = (() => {
 			}
 		});
 		// Make changes to the data
-		this.merge = mergeObj => {
+		this.merge = (mergeObj, actAsInternal) => {
 			let newData = merge.apply(data, mergeObj);
 			if (newData !== data) setData(newData);
-			sendUpdate(mergeObj, true);
+			sendUpdate(mergeObj, !actAsInternal);
 		};
 		
 		let addBinding = (host, template, templateSet, replace) => {
