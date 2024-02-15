@@ -845,6 +845,7 @@ self.Matsui = (() => {
 				};
 				let objArg = '__matsui_template';
 				let codeParts = {};
+				let scripts = [];
 
 				function walk(node, ignoreTemplate) {
 					function foundExpr(expr) {
@@ -865,6 +866,7 @@ self.Matsui = (() => {
 								let placeholder = nextPlaceholder(true);
 								codeParts[placeholder] = node.textContent;
 								node.textContent = placeholder;
+								scripts.push(node); // stay in the tree until .outerHTML below
 							}
 							return; // don't process <script>s any more than that
 						}
@@ -919,6 +921,7 @@ self.Matsui = (() => {
 						.replace(codeAssemblyRegex, p => `*/${codeParts[p]}/*`) + '*/';
 					fillPlaceholderMap = new Function(functionArgs, functionBody);
 				}
+				scripts.forEach(node => node.remove());
 				
 				function removeMarkedNodes(node) {
 					let text = (isScript(node) ? node.textContent : node.nodeValue);
