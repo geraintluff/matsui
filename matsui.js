@@ -934,7 +934,7 @@ self.Matsui = (() => {
 							removeMarkedNodes(child);
 							child = next;
 						}
-						if (/^template$/.test(node.tagName)) removeMarkedNodes(node.content);
+						if (/^template$/i.test(node.tagName)) removeMarkedNodes(node.content);
 					}
 				}
 				removeMarkedNodes(content);
