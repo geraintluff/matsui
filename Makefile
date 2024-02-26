@@ -12,24 +12,24 @@ release-%: release/%/matsui.min.js release/%/matsui.mjs release/%/matsui-bundle.
 	@for file in release/$*/*.gz ; do wc -c "$$file" ; done
 	@rm release/$*/*.gz
 
-release/%/matsui.js: matsui.js
+release/%/version.js:
 	@mkdir -p release/$*
 	@echo "Matsui.version = '$*';" > "$$(dirname $@)/version.js"
-	@echo "$@: $^"
-	@cat $^ "$$(dirname $@)/version.js" > $@
 
-release/%/matsui-bundle.js: matsui.js bundle/*.js
-	@mkdir -p release/$*
-	@echo "Matsui.version = '$*';" > "$$(dirname $@)/version.js"
-	@echo "$@: $^"
-	@cat $^ "$$(dirname $@)/version.js" > $@
+release/%/matsui.js: matsui.js release/%/version.js
+	@cat $^ > $@
+
+release/%/matsui-bundle.js: matsui.js bundle/*.js release/%/version.js
+	@cat $^ > $@
 
 %.min.js: %.js
-	@npx --offline uglify-js --warn --compress passes=10 --mangle --output-opts ascii_only --mangle-props "regex=/^(m_|#)/" -o $@ --source-map "base=$$(dirname $@),url=$$(basename $@).map" -- $<
+	@cd "$$(dirname $@)" && npx --offline uglify-js "$$(basename $<)" -o "$$(basename $@)" --source-map "url=$$(basename $@).map" \
+		--warn --compress passes=10 --mangle --output-opts ascii_only --mangle-props "regex=/^(m_|#)/"
 
 %.mjs: %.js
-	@cp bundle/module/export.js "$$(dirname $*)/export.js"
-	@npx --offline uglify-js --warn --compress passes=10 --mangle --output-opts ascii_only --mangle-props "regex=/^(m_|#)/" -o $@ --source-map "base=$$(dirname $@),url=$$(basename $@).map" -- $< "$$(dirname $*)/export.js"
+	@cd "$$(dirname $@)" && npx --offline uglify-js "$$(basename $<)" -o "$$(basename $@)" --source-map "url=$$(basename $@).map" \
+		--output-opts "preamble='export default Matsui;'" \
+		--warn --compress passes=10 --mangle --output-opts ascii_only --mangle-props "regex=/^(m_|#)/"
 
 publish:
 	publish-signalsmith-raw /code/matsui

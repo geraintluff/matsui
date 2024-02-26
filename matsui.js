@@ -1182,12 +1182,12 @@ self.Matsui = (() => {
 			return this;
 		};
 		this.addUpdates = (updates, notifyExternal) => {
-			updates = [].concat(updates);
+			let combined = combineUpdates([].concat(updates));
 			this.trackMerges(mergeObj => {
 				let withMerge = merge.addHidden(mergeTracked, mergeObj);
-				updates.forEach(fn => fn(withMerge));
+				combined(withMerge);
 			}, notifyExternal);
-			updates.forEach(fn => fn(mergeTracked));
+			combined(mergeTracked);
 		};
 
 		let setData = newData => {
@@ -1235,12 +1235,7 @@ self.Matsui = (() => {
 			if (!template) template = templateSet.fromElement(host);
 
 			let bindingInfo = template(templateSet.dynamic);
-			let combined = combineUpdates(bindingInfo.updates);
-			this.trackMerges(mergeObj => {
-				let withMerge = merge.addHidden(mergeTracked, mergeObj);
-				combined(withMerge);
-			}, true);
-			combined(mergeTracked);
+			this.addUpdates(bindingInfo.updates);
 			
 			let node = bindingInfo.node;
 			if (replace) {

@@ -8,265 +8,7 @@
 		<link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'" href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,opsz,wdth,wght,YTLC@0,6..12,75..125,200..1000,440..540;1,6..12,75..125,200..1000,440..540&family=Noto+Sans+Mono:wdth,wght@90,380..500&display=swap">
 		<link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" integrity="sha512-vswe+cgvic/XBoF1OcM/TeJ2FW0OofqAVdCZiEYkd6dwGXthvkSFWOoGGJgS2CW70VK5dQM5Oh+7ne47s74VTg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 		<link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css" integrity="sha512-cbQXwDFK7lj2Fqfkuxbo5iD1dSbLlJGXGpfTDqbggqjHJeyzx88I3rfwjS38WJag/ihH7lzuGlGHpDBymLirZQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-		<style>
-			* {
-				box-sizing: border-box;
-			}
-			body {
-				font-family: "Nunito Sans", Geneva, Arial, sans-serif;
-				font-optical-sizing: auto;
-				font-weight: 400;/*200-1000*/
-				font-style: normal;
-				font-variation-settings:
-					"wdth" 100/*75-125*/,
-					"YTLC" 520/*440-540*/;
-				font-size: 12pt;
-				line-height: 1.4;
-			
-				margin: 0;
-				padding: 0;
-				color: #000;
-				background: #F9F8F6;
-			}
-			pre, code {
-				height: 100%;
-			}
-			pre code .line-numbers-rows {
-				min-height: 100%;
-			}
-			pre.light, pre.light code, pre.light[class*=language-], .light code[class*=language-] {
-				background: none;
-				color: inherit;
-				height: auto;
-			}
-
-			code, pre, body pre.light[class*=language-] {
-				font-family: "Noto Sans Mono", Monaco, Consolas, monospace;
-				font-style: normal;
-				font-optical-sizing: auto;
-				font-weight: 380;
-				font-style: normal;
-				font-size: calc(min(0.85rem, 2.6vw));
-				margin: 0 auto;
-				padding: 0;
-				font-variation-settings:
-					"wdth" 90;
-				tab-size: 4;
-			}
-			code, code[class*=language] {
-				font-weight: 500;
-				font-size: 0.85em;
-			}
-			pre code[class*=language-] {
-				font: inherit;
-				display: block;
-				min-height: 100%;
-			}
-			code:not([class*=language-]) {
-				display: inline-block;
-				color: #820;
-			}
-			.stripe code:not([class*=language-]) {
-				color: #E78;
-			}
-			p {
-				margin: 0;
-				padding: 0.5em 0;
-			}
-			p:first-child {
-				margin-top: 0;
-			}
-			input {
-				vertical-align: middle;
-			}
-			select, button {
-				box-shadow: 0px 0.2em 0.1em -0.1em #0002;
-				background: var(--hover-bg, none), linear-gradient(#FFF, #F8F8F8 70%, #EEE);
-			}
-			select:hover, button:hover {
-				--hover-bg: linear-gradient(#FFF, #DDD);
-				cursor: pointer;
-			}
-			input:not([type]), input[type=text], button:active {
-				box-shadow: 0px 0.2em 0.1em -0.1em #0002 inset;
-				background: linear-gradient(#EEE, #F8F8F8 30%, #FFF);
-			}
-			select {
-				appearance: none;
-				-webkit-appearance: none;
-				-moz-appearance: none;
-				/* `data:image/svg+xml;base64,${btoa('<?xml version="1.0" encoding="utf-8"?>'+document.rootElement.outerHTML)}` */
-				background: url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz48c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmVyc2lvbj0iMS4xIj48c3ZnIHZpZXdCb3g9Ii0yIC0yIDEzIDEzIiBwcmVzZXJ2ZUFzcGVjdFJhdGlvPSJ4TWF4WU1pZCI+PHBhdGggZmlsbD0iIzg4OEQiIGQ9Ik0zIDMgNyAzIDUgNloiLz48L3N2Zz48L3N2Zz4=), var(--hover-bg, none), linear-gradient(#FFF, #F8F8F8 70%, #EEE);
-			}
-			select, input, button {
-				padding: 0.2em 0.5em;
-				text-align: center;
-				text-align-last: center;
-
-				border: 1px solid #888;
-				border-radius: 0.25rem;
-
-				font: inherit;
-				font-size: 0.9em;
-				color: inherit;
-			}
-			a[href], select {
-				font-weight: 400;
-				/*color: #64a3d9;*/
-				color: #48B;
-			}
-			body > * {
-				width: 100%;
-				margin: none;
-				box-sizing: border-box;
-				padding: 0.2em calc(max(0.5rem, 50% - 300pt));
-			}
-			hgroup, h1, h2, h3, h4, h5, h6, select {
-				font-family: "Nunito Sans", "Avant Garde", Avantgarde, "Century Gothic", Geneva, "Trebuchet MS", sans-serif;
-				text-align: center;
-				margin: 0.1em;
-				font-weight: 600;
-				font-variation-settings:
-					"wdth" 103/*75-125*/,
-					"YTLC" 440/*440-540*/;
-			}
-			details summary {
-				cursor: pointer;
-			}
-			details[open] summary {
-				border-bottom: 1px solid #8888;
-			}
-			summary h1, summary h2, summary h3, summary h4, summary h5, summary h6 {
-				display: inline-block;
-			}
-			h1 {
-				font-size: 3.2em;
-				font-weight: 200;
-			}
-			h2 {
-				font-family: "Nunito Sans", "Arial Narrow", "Trebuchet MS", sans-serif;
-				font-size: 2.2em;
-				font-weight: 350;
-				font-variation-settings:
-					"wdth" 85/*75-125*/,
-					"YTLC" 540/*440-540*/;
-			}
-			h3 {
-				font-size: 1.4em;
-				font-weight: 300;
-			}
-			.stripe h3 {
-				font-weight: 200;
-			}
-			h4, h5, h6 {
-				text-align: start;
-				font-size: 1.25em;
-				font-variation-settings:
-					"wdth" 95/*75-125*/,
-					"YTLC" 540/*440-540*/;
-				font-weight: 550;
-			}
-			h5 {
-				font-weight: 300;
-				font-variation-settings:
-					"wdth" 100/*75-125*/,
-					"YTLC" 440/*440-540*/;
-				font-style: italic;
-			}
-			h6 {
-				font-size: 0.9em;
-				font-weight: 400;
-				font-variation-settings:
-					"wdth" 120/*75-125*/,
-					"YTLC" 440/*440-540*/;
-				font-style: italic;
-				opacity: 0.85;
-			}
-			#ricky {
-				float: right;
-				height: 4rem;
-				width: 4rem;
-				margin: -4.5rem 0.25em 0 0;
-				border-radius: 5px;
-			}
-			.stripe {
-				background: var(--stripe-color, #345);
-				background: linear-gradient(#FFF2, #FFF1 10%, #0000 25%, #0006), var(--stripe-color, #345);
-				box-shadow: 0px 0.1rem 0.5rem #0005 inset, 0px 0.15rem 0.1rem #0003 inset;
-				color: #FFF;
-				font-weight: 320; /* thinner because it's white-on-dark text */
-				text-shadow: 0 0.2ex #0004;
-			}
-			.columns {
-				display: flex;
-				flex-direction: row;
-				flex-wrap: wrap;
-				justify-content: space-around;
-				gap: 1em;
-			}
-			.columns > * {
-				flex-basis: 13rem;
-				flex-grow: 0.3;
-			}
-			.columns h3 {
-				border-bottom: 1px solid currentcolor;
-			}
-			.showcase {
-				flex-basis: 250pt;
-				flex-grow: 1;
-			}
-			
-			figure {
-				min-width: 400pt;
-				width: min-content;
-				max-width: 100%;
-				margin: 1em auto;
-				padding: 0.3em;
-
-				text-align: center;
-
-				border: 1px solid #DDD;
-				border-radius: 0.25em;
-				box-shadow: 0px 0.05rem 0.05rem #0004 inset;
-				background: #FFF;
-				color: #000;
-				text-shadow: none;
-			}
-			.stripe figure {
-				background: #FFFFFFF8;
-				text-shadow: 0px 1px 1px #0002;
-				border: 1px solid #000;
-				box-shadow: 0px 0.1rem 0.05rem #0004 inset;
-			}
-			figure pre {
-				width: min-content;
-				max-width: 100%;
-				margin: 0 auto;
-				overflow: auto;
-			}
-			figcaption, fieldset legend {
-				text-align: center;
-				font-size: 0.85em;
-				font-style: italic;
-				font-weight: 500;
-				opacity: 0.7;
-				font-variation-settings:
-					"wdth" 90/*75-125*/,
-					"YTLC" 500/*440-540*/;
-			}
-			
-			dt, dt code {
-				font-weight: 600;
-			}
-			dd {
-				border-top: 0.5px dashed currentcolor;
-				margin: 0;
-				padding-left: 2.5em;
-			}
-			dd dd {
-				border: none;
-			}
-		</style>
+		<link rel="stylesheet" href="doc/style.css"/>
 		<link href="bundle/interaction.css" rel="stylesheet">
 	</head>
 	<body>
@@ -358,102 +100,7 @@
 			<details><summary>Smart updates (data proxies)</summary></details>
 		</section>
 
-		<script src="release/latest/matsui-bundle.min.js"></script>
-
-		<style>
-			.showcase-result label {
-				display: block;
-				user-select: none;
-			}
-			#html-templates {
-				position: relative;
-				padding-bottom: 0.8em;
-			}
-			.showcase {
-				display: flex;
-				flex-direction: row;
-				flex-wrap: wrap;
-				width: 100%;
-				max-width: 100%;
-				padding: 0;
-			}
-			.showcase figure {
-				flex-basis: 50ch;
-				min-width: 50ch;
-				flex-grow: 1;
-				text-align: left;
-				border-radius: 0;
-				border: 1px solid #888;
-				margin: 0 -1px -1px 0;
-				padding: 0;
-			}
-			.showcase pre {
-				width: 100%;
-				margin: 0;
-				padding: 0;
-				font-size: 0.8em;
-			}
-			.showcase-template, .showcase-js, .showcase-result {
-				position: relative;
-				padding: 0.5em 0.8em;
-				text-align: left;
-				max-height: 50vh;
-				overflow: auto;
-			}
-			.showcase-template::before, .showcase-js::before, .showcase-result::before, #showcase-switch {
-				position: absolute;
-				top: 0;
-				right: 0.5em;
-				font-size: 0.8em;
-				content: 'template';
-				color: #FFF;
-				z-index: 1;
-			}
-			#showcase-switch {
-				top: auto;
-				bottom: 0.1em;
-				user-select: none;
-				color: #000;
-			}
-			.showcase-js::before {
-				content: 'render';
-			}
-			.showcase-result::before {
-				color: #000;
-				content: 'result'
-			}
-			.showcase-template {
-				background: #F6F6F6;
-			}
-			.showcase-js {
-				background: #F0F6FC;
-			}
-			figure.showcase-result {
-				width: 100%;
-				flex-basis: 100%;
-				padding: 1em;
-			}
-			
-			fieldset {
-				border-radius: 0.3em;
-			}
-			fieldset legend {
-				font-size: inherit;
-			}
-		</style>
-		
 		<section id="html-templates">
-			<script id="showcase-common">
-				let wrapped = Matsui.wrap({
-					name: 'world',
-					slider: 50,
-					bool: false,
-					nested: {
-						list: ['A', 'B', 'C']
-					}
-				});
-			</script>
-
 			<h2>HTML Templates</h2>
 			
 			<p>Matsui includes an HTML template syntax.  These can be defined in the page itself, or as a <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates">tagged template literal</a>.  If you call <code>.replace(node)</code> without a template argument, it will use the node as a template and fill it out in-place.</p>
@@ -540,6 +187,24 @@ templateSet.addTagged("example")`${myFunc}`;
 			<h3>Example</h3>
 
 			<label id="showcase-switch" class="matsui-bind"><input type="checkbox" $value="jsTemplate">JavaScript</label>
+			<script src="release/latest/matsui-bundle.min.js"></script>
+			<script id="showcase-common">
+				let wrapped = Matsui.wrap({
+					name: 'world',
+					slider: 50,
+					bool: false,
+					nested: {
+						list: ['A', 'B', 'C']
+					}
+				}).syncLocalStorage(data => ({
+					get matsuiExample() {
+						return data; // save the whole state
+					},
+					set matsuiExample(d) {
+						wrapped.merge(d);
+					}
+				}));
+			</script>
 		</section>
 		<section class="showcase line-numbers" id="showcase-html">
 			<figure class="showcase-template matsui-bind"><pre class="language-html"><code>{showcase.html.html}</code></pre></figure>
@@ -671,10 +336,6 @@ templateSet.addTagged("example")`${myFunc}`;
 		<script defer fetchpriority="low" src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js" integrity="sha512-SkmBfuA2hqjzEVpmnMt/LINrjop3GKWqsuLSSB3e7iBmYK7JuWw4ldmmxwD9mdm2IRTTi0OxSAfEGvgEi0i2Kw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 		<script  defer fetchpriority="low" src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js" integrity="sha512-BttltKXFyWnGZQcRWj6osIg7lbizJchuAMotOkdLxHxwt/Hyo+cl47bZU0QADg+Qt5DJwni3SbYGXeGMB5cBcw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
-		<style>
-			@import('https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css');
-		</style>
-		<style>
-			.light .token.cdata,.light .token.comment,.light .token.doctype,.light .token.prolog{color:#708090}.light .token.punctuation{color:#888}.light .token.namespace{opacity:.7}.light .token.boolean,.light .token.constant,.light .token.deleted,.light .token.number,.light .token.property,.light .token.symbol,.light .token.tag{color:#905}.light .token.attr-name,.light .token.builtin,.light .token.char,.light .token.inserted,.light .token.selector,.light .token.string{color:#690}.language-css .light .token.string,.style .light .token.string,.light .token.entity,.light .token.operator,.light .token.url{color:#9a6e3a}.light .token.atrule,.light .token.attr-value,.light .token.keyword{color:#07a}.light .token.class-name,.light .token.function{color:#dd4a68}.light .token.important,.light .token.regex,.light .token.variable{color:#e90}.light .token.bold,.light .token.important{font-weight:700}.light .token.italic{font-style:italic}.light .token.entity{cursor:help}.light .token.template-punctuation{color:#460;font-weight:600}</style>
+		<style>.light .token.cdata,.light .token.comment,.light .token.doctype,.light .token.prolog{color:#708090}.light .token.punctuation{color:#888}.light .token.namespace{opacity:.7}.light .token.boolean,.light .token.constant,.light .token.deleted,.light .token.number,.light .token.property,.light .token.symbol,.light .token.tag{color:#905}.light .token.attr-name,.light .token.builtin,.light .token.char,.light .token.inserted,.light .token.selector,.light .token.string{color:#690}.language-css .light .token.string,.style .light .token.string,.light .token.entity,.light .token.operator,.light .token.url{color:#9a6e3a}.light .token.atrule,.light .token.attr-value,.light .token.keyword{color:#07a}.light .token.class-name,.light .token.function{color:#dd4a68}.light .token.important,.light .token.regex,.light .token.variable{color:#e90}.light .token.bold,.light .token.important{font-weight:700}.light .token.italic{font-style:italic}.light .token.entity{cursor:help}.light .token.template-punctuation{color:#460;font-weight:600}</style>
 	</body>
 </html>

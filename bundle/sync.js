@@ -91,7 +91,6 @@ Matsui.merge.apply(Matsui.Wrapped.prototype, {
 		readFromStorage(null); // load everything
 
 		wrapped.addUpdates(data => { // update localStorage
-			data - Matsui.access.pierce(data);
 			let syncTarget = dataToSyncTarget(data);
 			for (let k in syncTarget) {
 				let value = syncTarget[k];

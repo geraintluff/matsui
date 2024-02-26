@@ -109,11 +109,8 @@ Matsui.interaction = (attributes => {
 		});
 	};
 	
-	let supportPointerLock = true;
 	attributes.pointerLock = (node, value) => {
-		if (supportPointerLock) {
-			node._interactionPointerLock = (typeof value === 'function') ? value() : (value == "" || value);
-		}
+		node._interactionPointerLock = (typeof value === 'function') ? value() : (value == "" || value);
 	};
 
 	attributes.move = (node, handler) => {
@@ -184,7 +181,7 @@ Matsui.interaction = (attributes => {
 		}, {capture: true});
 	};
 	
-	function press(node, handler, includeKeys) {
+	attributes.press = (node, handler) => {
 		node.classList.add("interaction-has-press");
 		let clickCount = 0;
 		let prevDown = 0;
@@ -206,21 +203,18 @@ Matsui.interaction = (attributes => {
 			isDown = false;
 			if (e.pointerId) node.releasePointerCapture(e.pointerId);
 		};
-		if (includeKeys) addKeys(node, {Enter: down, ' ': down}, {Enter: up, ' ': up});
+		addKeys(node, {Enter: down, ' ': down}, {Enter: up, ' ': up});
 		node.addEventListener('blur', up);
 		node.addEventListener('pointerdown', e => {
 			if (!isPrimary(e)) return;
-			if (includeKeys) { // otherwise, the focus won't cascade to a parent that has key handlers
-				e.preventDefault();
-				e.stopPropagation();
-				node.focus();
-			}
+			e.preventDefault();
+			e.stopPropagation();
+			node.focus();
 			down(e);
 		});
 		node.addEventListener('pointerup', up);
 		node.addEventListener('pointercancel', up);
 	};
-	attributes.press = (node, handler) => press(node, handler, true);
 	attributes.unpress = (node, handler) => {
 		node.classList.add("interaction-has-unpress");
 		let start = null;
