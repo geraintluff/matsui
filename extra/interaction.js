@@ -1,4 +1,4 @@
-let Interaction = (attributes => {
+Matsui.interaction = (attributes => {
 	let doubleClickMs = 300;
 	
 	attributes['class'] = (node, dataFn) => {
@@ -69,23 +69,24 @@ let Interaction = (attributes => {
 	}
 
 	attributes.value = (node, keyPath, getData) => {
+		let isCheckbox = (node.tagName == 'INPUT' && node.type == 'checkbox');
 		if (typeof keyPath == 'string') {
 			keyPath = keyPath.split('.');
 			let key = keyPath.pop();
 
-			function update() {
+			function updateData() {
 				let data = getData();
 				keyPath.forEach(k => data = data?.[k]);
-				if (data) data[key] = (typeof node.checked == 'boolean' ? node.checked : node.value);
+				if (data) data[key] = (isCheckbox ? node.checked : node.value);
 			}
-			node.addEventListener('input', update);
-			node.addEventListener('change', update);
+			node.addEventListener('input', updateData);
+			node.addEventListener('change', updateData);
 			
 			return data => {
 				keyPath.forEach(k => data = data?.[k]);
 				if (data) {
 					node.value = data[key];
-					if (typeof node.checked == 'boolean') node.checked = data[key];
+					if (isCheckbox) node.checked = data[key];
 				}
 			};
 		}
