@@ -70,6 +70,7 @@ Matsui.interaction = (attributes => {
 
 	attributes.value = (node, keyPath, getData) => {
 		let isCheckbox = (node.tagName == 'INPUT' && node.type == 'checkbox');
+		let isNumeric = (node.tagName == 'INPUT' && (node.type == 'range' || node.type == 'number'));
 		if (typeof keyPath == 'string') {
 			keyPath = keyPath.split('.');
 			let key = keyPath.pop();
@@ -77,7 +78,7 @@ Matsui.interaction = (attributes => {
 			function updateData() {
 				let data = getData();
 				keyPath.forEach(k => data = data?.[k]);
-				if (data) data[key] = (isCheckbox ? node.checked : node.value);
+				if (data) data[key] = (isCheckbox ? node.checked : isNumeric ? parseFloat(node.value) : node.value);
 			}
 			node.addEventListener('input', updateData);
 			node.addEventListener('change', updateData);
@@ -116,6 +117,7 @@ Matsui.interaction = (attributes => {
 	};
 
 	attributes.move = (node, handler) => {
+		node.classList.add("interaction-has-move");
 		node.style.touchAction = "none"; // enables dragging on a touch-screen
 		
 		node.style.cursor = node.style.cursor || "grab";
@@ -138,6 +140,7 @@ Matsui.interaction = (attributes => {
 
 		let downCount = 0;
 		node.addEventListener('pointerdown', e => {
+			node.classList.add("interaction-move");
 			if (!isPrimary(e)) return;
 			e.preventDefault();
 			e.stopPropagation();
@@ -152,6 +155,7 @@ Matsui.interaction = (attributes => {
 			releaseCursor = node.style.pointer;
 		});
 		function up(e) {
+			node.classList.remove("interaction-move");
 			e.preventDefault();
 			e.stopPropagation();
 			if (document.pointerLockElement == node) document.exitPointerLock();
@@ -170,6 +174,7 @@ Matsui.interaction = (attributes => {
 	}
 
 	attributes.scroll = (node, handler) => {
+		node.classList.add("interaction-has-scroll");
 		// TODO: use keys with Alt/Meta
 		node.addEventListener("wheel", e => {
 			e.preventDefault();
@@ -180,6 +185,7 @@ Matsui.interaction = (attributes => {
 	};
 	
 	function press(node, handler, includeKeys) {
+		node.classList.add("interaction-has-press");
 		let clickCount = 0;
 		let prevDown = 0;
 		let isDown = false;
@@ -216,6 +222,7 @@ Matsui.interaction = (attributes => {
 	};
 	attributes.press = (node, handler) => press(node, handler, true);
 	attributes.unpress = (node, handler) => {
+		node.classList.add("interaction-has-unpress");
 		let start = null;
 		let down = e => {
 			start = Date.now();
@@ -239,7 +246,16 @@ Matsui.interaction = (attributes => {
 		});
 		node.addEventListener('pointerup', up);
 	};
-	attributes.click = (node, handler) => press(node, handler, false);
+	attributes.click = (node, handler) => {
+		let clickCount = 0;
+		let prevDown = 0;
+		node.addEventListener('click', e => {
+			let now = Date.now(), diff = now - prevDown;
+			prevDown = now;
+			if (diff > doubleClickMs) clickCount = 0;
+			handler(++clickCount, e, node);
+		});
+	};
 
 	attributes['delete'] = (node, handler) => {
 		node.addEventListener('keydown', e => {
@@ -269,12 +285,26 @@ Matsui.interaction = (attributes => {
 			}
 		});
 	};
+	
+	attributes.clipboard = (node, value) => {
+		node.classList.add("interaction-has-clipboard");
+		return attributes.press(node, _ => {
+			let text = value ? (typeof value == 'function' ? value(node) : value) : node.textContent;
+			navigator.clipboard.writeText(text);
+			node.classList.remove("interaction-clipboard");
+			node.classList.add("interaction-clipboard");
+			setTimeout(() => {
+				node.classList.remove("interaction-clipboard");
+			}, 1000);
+		});
+	};
 
 	attributes.dropFileIf = (node, valueFn) => {
 		node._interactionDropIfHandler = valueFn;
 	};
 
 	attributes.dropFile = (node, valueFn) => {
+		node.classList.add("interaction-has-drop");
 		if (valueFn == "") {
 			// walk up the tree until we find an actual handler
 			valueFn = files => {

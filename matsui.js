@@ -454,7 +454,7 @@ self.Matsui = (() => {
 			node.addEventListener(attrKey, e => handler(e, node));
 		} else if (attrKey in node) {
 			return d => {
-				let v = handler();
+				let v = handler(node);
 				try {
 					node[attrKey] = v;
 				} catch (e) { // Write-only attributes will throw on assignment, so we fall back to attributes
@@ -467,7 +467,7 @@ self.Matsui = (() => {
 			};
 		} else {
 			return d => {
-				let v = handler();
+				let v = handler(node);
 				if (v == null && node.hasAttribute(attrKey)) {
 					node.removeAttribute(attrKey);
 				} else if (node.getAttribute(attrKey) != v) {
@@ -591,7 +591,7 @@ self.Matsui = (() => {
 						let maybeUpdate;
 						if (literalName) {
 							maybeUpdate = d => {
-								let v = attrIsFn ? boundAttr() : attr;
+								let v = attrIsFn ? boundAttr(node) : attr;
 								if (v == null) {
 									node.removeAttribute(attrKey);
 								} else {

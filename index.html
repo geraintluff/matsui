@@ -6,6 +6,8 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 
 		<link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'" href="https://fonts.googleapis.com/css2?family=Nunito+Sans:ital,opsz,wdth,wght,YTLC@0,6..12,75..125,200..1000,440..540;1,6..12,75..125,200..1000,440..540&family=Noto+Sans+Mono:wdth,wght@90,380..500&display=swap">
+		<link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" integrity="sha512-vswe+cgvic/XBoF1OcM/TeJ2FW0OofqAVdCZiEYkd6dwGXthvkSFWOoGGJgS2CW70VK5dQM5Oh+7ne47s74VTg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+		<link rel="preload" as="style" onload="this.onload=null;this.rel='stylesheet'" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css" integrity="sha512-cbQXwDFK7lj2Fqfkuxbo5iD1dSbLlJGXGpfTDqbggqjHJeyzx88I3rfwjS38WJag/ihH7lzuGlGHpDBymLirZQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 		<style>
 			* {
 				box-sizing: border-box;
@@ -26,25 +28,46 @@
 				color: #000;
 				background: #F9F8F6;
 			}
-			pre {
-				font-size: calc(min(0.85em, 2.6vw));
-			}
 			pre, code {
+				height: 100%;
+			}
+			pre code .line-numbers-rows {
+				min-height: 100%;
+			}
+			pre.light, pre.light code, pre.light[class*=language-], .light code[class*=language-] {
+				background: none;
+				color: inherit;
+				height: auto;
+			}
+
+			code, pre, body pre.light[class*=language-] {
 				font-family: "Noto Sans Mono", Monaco, Consolas, monospace;
 				font-style: normal;
 				font-optical-sizing: auto;
-				font-weight: 500;
+				font-weight: 380;
 				font-style: normal;
+				font-size: calc(min(0.85rem, 2.6vw));
+				margin: 0 auto;
+				padding: 0;
 				font-variation-settings:
 					"wdth" 90;
 				tab-size: 4;
 			}
-			pre code {
-				font-weight: 380;
+			code, code[class*=language] {
+				font-weight: 500;
+				font-size: 0.85em;
+			}
+			pre code[class*=language-] {
+				font: inherit;
+				display: block;
+				min-height: 100%;
 			}
 			code:not([class*=language-]) {
 				display: inline-block;
 				color: #820;
+			}
+			.stripe code:not([class*=language-]) {
+				color: #E78;
 			}
 			p {
 				margin: 0;
@@ -52,6 +75,9 @@
 			}
 			p:first-child {
 				margin-top: 0;
+			}
+			input {
+				vertical-align: middle;
 			}
 			select, button {
 				box-shadow: 0px 0.2em 0.1em -0.1em #0002;
@@ -61,7 +87,7 @@
 				--hover-bg: linear-gradient(#FFF, #DDD);
 				cursor: pointer;
 			}
-			input, button:active {
+			input:not([type]), input[type=text], button:active {
 				box-shadow: 0px 0.2em 0.1em -0.1em #0002 inset;
 				background: linear-gradient(#EEE, #F8F8F8 30%, #FFF);
 			}
@@ -104,6 +130,15 @@
 					"wdth" 103/*75-125*/,
 					"YTLC" 440/*440-540*/;
 			}
+			details summary {
+				cursor: pointer;
+			}
+			details[open] summary {
+				border-bottom: 1px solid #8888;
+			}
+			summary h1, summary h2, summary h3, summary h4, summary h5, summary h6 {
+				display: inline-block;
+			}
 			h1 {
 				font-size: 3.2em;
 				font-weight: 200;
@@ -118,6 +153,9 @@
 			}
 			h3 {
 				font-size: 1.4em;
+				font-weight: 300;
+			}
+			.stripe h3 {
 				font-weight: 200;
 			}
 			h4, h5, h6 {
@@ -173,87 +211,63 @@
 			.columns h3 {
 				border-bottom: 1px solid currentcolor;
 			}
+			.showcase {
+				flex-basis: 250pt;
+				flex-grow: 1;
+			}
+			
+			figure {
+				min-width: 400pt;
+				width: min-content;
+				max-width: 100%;
+				margin: 1em auto;
+				padding: 0.3em;
 
-			.example {
-				border: 1px solid #888;
-				border-radius: 0.25rem;
+				text-align: center;
 
-				position: relative;
-				display: flex;
-				flex-direction: row;
-				flex-wrap: wrap;
-				align-items: stretch;
-				justify-content: stretch;
-				box-sizing: border-box;
-				margin: 1rem 0.5rem;
+				border: 1px solid #DDD;
+				border-radius: 0.25em;
+				box-shadow: 0px 0.05rem 0.05rem #0004 inset;
 				background: #FFF;
 				color: #000;
 				text-shadow: none;
 			}
-			.example > * {
-				flex-grow: 1;
-				border: 1px solid #888;
-				padding: 0.25em;
-				margin: -1px;
+			.stripe figure {
+				background: #FFFFFFF8;
+				text-shadow: 0px 1px 1px #0002;
+				border: 1px solid #000;
+				box-shadow: 0px 0.1rem 0.05rem #0004 inset;
 			}
-			#example-select {
-				display: block;
-				width: 100%;
-				margin-right: 3.8em;
-				height: 2.6em;
-
-				font: inherit;
-				font-size: 0.95em;
+			figure pre {
+				width: min-content;
+				max-width: 100%;
+				margin: 0 auto;
+				overflow: auto;
+			}
+			figcaption, fieldset legend {
+				text-align: center;
+				font-size: 0.85em;
+				font-style: italic;
+				font-weight: 500;
+				opacity: 0.7;
 				font-variation-settings:
-					"wdth" 110/*75-125*/,
-					"YTLC" 540/*440-540*/;
+					"wdth" 90/*75-125*/,
+					"YTLC" 500/*440-540*/;
 			}
-			.example-desc {
-				border-top: none;
-				width: 100%;
-				padding: 0.5em 0.8em;
-				font-size: 0.95em;
-				font-style: normal;
+			
+			dt, dt code {
+				font-weight: 600;
 			}
-			.example-html, .example-js {
-				position: relative;
-				flex-basis: 40ch;
-				padding: 0.5em 0.8em;
-				text-align: left;
+			dd {
+				border-top: 0.5px dashed currentcolor;
+				margin: 0;
+				padding-left: 2.5em;
 			}
-			.example-html::before, .example-js::before {
-				position: absolute;
-				top: 0;
-				right: 0.3em;
-				font-size: 0.65em;
-				content: 'HTML';
-				color: #666;
-			}
-			.example-js::before {
-				content: 'JS';
-			}
-			.example-html {
-				background: #F6F6F6;
-			}
-			.example-js {
-				background: #F0F6FC;
-			}
-			.example-result {
+			dd dd {
 				border: none;
-				width: 100%;
-				padding: 0.8em;
-				text-align: left;
-			}
-			#link-to-example {
-				position: absolute;
-				top: 0;
-				right: 0.5em;
-				text-decoration: none;
-				font-size: 1.5em;
-				color: #888A;
-				transform: rotate(180deg);
 			}
 		</style>
+		<link href="bundle/interaction.css" rel="stylesheet">
 	</head>
 	<body>
 		<hgroup>
@@ -284,7 +298,7 @@
 				</div>
 				<div>
 					<h3>No compilation</h3>
-					<p>No transpiling or special tools - it's all just JavaScript (ES6) which you can use in static sites or local files.</p>
+					<p>No transpiling or special tools - it's all just JavaScript (ES6), usable in static sites or local files.</p>
 				</div>
 				<div>
 					<h3>CSP support</h3>
@@ -292,93 +306,329 @@
 				</div>
 			</div>
 		</section>
-		<section id="examples">
-			<h2>Quick-start guide</h2>
-			
-			<div class="example">
-				<select id="example-select" $value="exampleName">
-					<optgroup @foreach="{groups}" $label="{label}">
-						<option @foreach="{examples}" $-value="{name}" $selected="{selected}">{name}</option>
-					</optgroup>
-				</select>
-				<template @foreach="{groups}">
-					<template @foreach="{examples}">
-						<template @if="{selected}">
-							<div class="example-desc">
-								<a id="link-to-example" $href="#${d => Matsui.makeHash(null, {example: d.name}).hash}" title="share this example">#↩</a>
-								$html{desc}
-							</div>
-							<script>
-								function runExample(data, node) {
-									Matsui.access.pierce(data); // so we get updates
-									node.innerHTML = data.html;
-									let elementMap = data.elements || {};
-									let args = Object.keys(elementMap);
-									let elements = args.map(q => node.querySelector(elementMap[q]));
-									if (!('node' in elementMap)) {
-										args.push('node');
-										elements.push(node);
-									}
-									let fn = new Function(...args, data.js);
-									fn(...elements);
-								}
-							</script>
-							<pre @if="{html}" class="example-html language-html">$prism-code{html}</pre>
-							<pre @if="{js}" class="example-js language-js">$prism-code{js}</pre>
-							<div @if="{js}" class="example-result"><div $update="${runExample}"></div></div>
-						</template>
-					</template>
-				</template>
-			</div>
+		<section id="get" class="matsui-bind">
+			<h2>Get started</h2>
+			<p>Include Matsui:</p>
+			<figure $clipboard="${(d,n) => n.querySelector('pre').textContent}">
+				<pre class="light language-html"><code>&lt;script src="{srcPrefix}matsui-bundle.min.js">&lt;/script></code></pre>
+				<figcaption>plain JS</figcaption>
+			</figure>
+			<figure $clipboard="${(d,n) => n.querySelector('pre').textContent}">
+				<pre class="light language-js"><code>import Matsui from "{srcPrefix}matsui-bundle.mjs";</code></pre>
+				<figcaption>ES6 module</figcaption>
+			</figure>
+			<p>And point it at your document:</p>
+			<figure>
+				<pre class="light language-js"><code>Matsui.replace(element, {foo: 'bar'});</code></pre>
+			</figure>
 		</section>
-		<section id="design" class="stripe" style="--stripe-color: #353; --stripe-color:#5C534A">
-			<h2>Under the hood</h2>
-			
-			<p>Matsui is best understood in layers:</p>
+
+		<section id="design" class="stripe" style="--stripe-color: #353;">
+			<h2>Design</h2>
+			<details>
+				<summary>Core concepts</summary>
+				<dl>
+					<dt>Template</dt>
+					<dd>A template is any function which takes a sub-template as an argument (which it doesn't have to use), and returns a DOM node (or <code>DocumentFragment</code>) and a list of update functions.
+						<figure><pre class="light language-js"><code>let jsonTemplate = innerTemplate => {
+		let node = document.createTextNode('');
+		return {
+			node: node,
+			updates: [data => node.nodeValue = JSON.stringify(data)]
+		};
+	};</code></pre></figure>
+					</dd>
+					<dt>Template set</dt>
+					<dd>A template set (like <code>Matsui.global</code>) contains a map of named templates, attribute handlers, and template transforms.
+						<figure><pre class="light language-js"><code>let templateSet = Matsui.global.extend();
+	templateSet.add("json", jsonTemplate);</code></pre></figure>
+					</dd>
+					<dt>Attribute handler</dt>
+					<dd>A function which takes an existing DOM node and a function/value.  It (optionally) returns a data-update function which will be included in some template's update-function list.
+						<figure><pre class="light language-js"><code>templateSet.attributes.allKeys = (node, value) => {
+		// pass all events through (assumes `value` is a function!)
+		node.addEventListener('keydown', e => value(e, node));
+	}</code></pre></figure>
+						There's an optional third argument which gets the latest data value.  This is useful when the value isn't actually the data to be used, but describes how the data should be accessed (e.g. which property to read/update).
+					</dd>
+					<dt>Template transform</dt>
+					<dd>A function which takes an existing template, a value (possibly a function) and a template set, and returns a new template.</dd>
+				</dl>
+			</details>
+			<details><summary>Smart updates (data proxies)</summary></details>
 		</section>
 
 		<script src="release/latest/matsui-bundle.min.js"></script>
+
 		<style>
-			/* for the examples */
-			
-			blockquote {
-				margin-left: 1.25em;
-				padding-left: 1.25em;
-				border-left: 2px solid #8884;
-				font-style: italic;
+			.showcase-result label {
+				display: block;
+				user-select: none;
 			}
-			
-			#change-list {
-				border: 1px solid #DDD;
-				border-radius: 0.3em;
-				background: linear-gradient(0deg, #FFF, #FFF 4.7em, #0002);
-				height: 5em;
+			#html-templates {
+				position: relative;
+				padding-bottom: 0.8em;
+			}
+			.showcase {
+				display: flex;
+				flex-direction: row;
+				flex-wrap: wrap;
+				width: 100%;
+				max-width: 100%;
+				padding: 0;
+			}
+			.showcase figure {
+				flex-basis: 50ch;
+				min-width: 50ch;
+				flex-grow: 1;
+				text-align: left;
+				border-radius: 0;
+				border: 1px solid #888;
+				margin: 0 -1px -1px 0;
+				padding: 0;
+			}
+			.showcase pre {
+				width: 100%;
+				margin: 0;
+				padding: 0;
+				font-size: 0.8em;
+			}
+			.showcase-template, .showcase-js, .showcase-result {
+				position: relative;
+				padding: 0.5em 0.8em;
+				text-align: left;
+				max-height: 50vh;
 				overflow: auto;
-				scroll-behavior: smooth;
+			}
+			.showcase-template::before, .showcase-js::before, .showcase-result::before, #showcase-switch {
+				position: absolute;
+				top: 0;
+				right: 0.5em;
+				font-size: 0.8em;
+				content: 'template';
+				color: #FFF;
+				z-index: 1;
+			}
+			#showcase-switch {
+				top: auto;
+				bottom: 0.1em;
+				user-select: none;
+				color: #000;
+			}
+			.showcase-js::before {
+				content: 'render';
+			}
+			.showcase-result::before {
+				color: #000;
+				content: 'result'
+			}
+			.showcase-template {
+				background: #F6F6F6;
+			}
+			.showcase-js {
+				background: #F0F6FC;
+			}
+			figure.showcase-result {
+				width: 100%;
+				flex-basis: 100%;
+				padding: 1em;
 			}
 			
-			.hulk {
-				font-size: 3em;
-				filter: contrast(0.2) sepia(1) hue-rotate(45deg) saturate(2);
-				-webkit-filter: contrast(0.2) sepia(1) hue-rotate(45deg) saturate(2);
+			fieldset {
+				border-radius: 0.3em;
+			}
+			fieldset legend {
+				font-size: inherit;
 			}
 		</style>
+		
+		<section id="html-templates">
+			<script id="showcase-common">
+				let wrapped = Matsui.wrap({
+					name: 'world',
+					slider: 50,
+					bool: false,
+					nested: {
+						list: ['A', 'B', 'C']
+					}
+				});
+			</script>
+
+			<h2>HTML Templates</h2>
+			
+			<p>Matsui includes an HTML template syntax.  These can be defined in the page itself, or as a <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates">tagged template literal</a>.  If you call <code>.replace(node)</code> without a template argument, it will use the node as a template and fill it out in-place.</p>
+
+			<h3>Syntax</h3>
+			<details>
+				<summary><h4>Content expressions</h4></summary>
+				<p>Expressions in the content are rendered with the inner template:</p>
+				<dl>
+					<dt><code>{key}</code> and <code>{foo.bar}</code></dt>
+					<dd>Simple property access.</code></dd>
+					<dt><code>${expr}</code></dt>
+					<dd>A JavaScript expression.  If it's a function (e.g. <code>${data => ...}</code>), it's used to transform the data before rendering.</dd>
+					<dt><code>$named{key}</code></dt>
+					<dt><code>$named${expr}</code></dt>
+					<dd>Uses a named template to render the given expression.</dd>
+					<dt><code>$foo$bar{key}</code></dt>
+					<dt><code>$foo$bar{expr}</code></dt>
+					<dd>Passes the <code>"bar"</code> template as the inner-template to the <code>"foo"</code> one, and so on.  Particularly useful for things like <code>$list$custom{...}</code>.</dd>
+				</dl>
+			</details>
+			<details>
+				<summary><h4>Dynamic attributes</h4></summary>
+				<p>Attributes starting with <code>$</code> are treated as dynamic.  The default attribute handler (when no attribute is registered with that name) uses the value as an <strong>event handler</strong> or <strong>DOM object property</strong> if a matching one exists, or the HTML attribute otherwise.</p>
+				<dl>
+					<dt><code>$attr="some value"</code> (no dynamic content)</dt>
+					<dd>Hands a constant (string) value to the attribute handler.</dd>
+					<dt><code>$attr="{key}"</code></dt>
+					<dt><code>$attr="${expr}"</code></dt>
+					<dd>If the whole property is one expression, then it's passed directly to the attribute handler.  If <code>expr</code> is a function, it's called with the data as the first argument, plus any additional arguments provided by the attribute handler.</dd>
+					<dt><code>$attr="{foo} {bar}"</code></dt>
+					<dt><code>$attr="some ${expr}"</code></dt>
+					<dd>If the property isn't a single expression, all dynamic parts are called as above, but the result is flattened into a string before returning.</dd>
+					<dt><code>$-attr="..."</code></dt>
+					<dd>Always updates the HTML attribute, rather than a registered attribute / event / DOM property.</dd>
+				</dl>
+			</details>
+			
+			<details>
+				<summary><h4>Nested templates</h4></summary>
+				<dl>
+					<dt><code>&lt;template name="..."></code></dt>
+					<dd>Registers a named template, available from within the current template.  This can <em>only</em> be used as a direct child of the parent template, or it will throw an error.</dd>
+					<dt><code>&lt;template></code></dt>
+					<dd>Rendered immediately, using the same data as their surrounding context.  Mostly useful where you can't have a text-node (e.g. inside a <code>&lt;table></code>).</dd>
+				</dl>
+			</details>
+
+			<details>
+				<summary><h4>Template transforms</h4></summary>
+				<p>Attributes starting with <code>@</code> refer to template transforms.  The attribute value is interpreted similarly to <code>$</code>-attributes, except there is no data argument (since this is applied during template parsing).</p>
+				<p>You should only have one <code>@</code>-transform on each element, because the order of HTML attributes is not guaranteed.</p>
+				<dl>
+					<dt><code>&lt;element @transform="..."></code></dt>
+					<dd>Parses <code>&lt;element</code> as an HTML template, with all the above syntax, and then transforms it with the registered transform.</dd>
+				</dl>
+			</details>
+
+			<details>
+				<summary><h4><code>&lt;script></code>s inside templates</h4></summary>
+				<p>Any <code>&lt;script></code>s inside a <code>&lt;template></code> are run when the template is instantiated, and they're</p>
+				<figure>
+					<pre class="light language-html"><code>&lt;template name="example">
+	&lt;script>
+		function myFunc(data) {...}
+	&lt;/script>
+	${myFunc}
+&lt;/template>
+
+&lt;!-- error: myFunc is not defined here --&gt;
+${myFunc}
+</code></pre>
+					<figcaption>HTML template</figcaption>
+				</figure>
+				<p>This isn't available in when using tagged template literals, but you can define the same things next to the template definition.</p>
+				<figure>
+					<pre class="light language-js"><code>function myFunc(data) {...}
+templateSet.addTagged("example")`${myFunc}`;
+</code></pre>
+					<figcaption>JS tagged template literal</figcaption>
+				</figure>
+			</details>
+			
+			<h3>Example</h3>
+
+			<label id="showcase-switch" class="matsui-bind"><input type="checkbox" $value="jsTemplate">JavaScript</label>
+		</section>
+		<section class="showcase line-numbers" id="showcase-html">
+			<figure class="showcase-template matsui-bind"><pre class="language-html"><code>{showcase.html.html}</code></pre></figure>
+			<figure class="showcase-js matsui-bind" ><pre class="language-js"><code>{showcase.html.js}</code></pre></figure>
+			<figure class="showcase-result">
+				<h4>Hello {name}!</h4>
+				
+				<ol>
+					<li @foreach="{nested.list}">{=}</li>
+				</ol>
+				
+				<fieldset>
+					<legend>inputs</legend>
+					<label>
+						name:
+						<input $value="name">
+						<button $click="${d => d.name = ''}">clear</button>
+					</label>
+					<label>
+						slider:
+						<input type="range" min="0" max="100" $value="slider">
+						{slider} (${d => typeof d.slider})
+					</label>
+					<label>
+						check:
+						<input type="checkbox" $value="bool">
+						{bool}
+					</label>
+				</fieldset>
+			</figure>
+			<script>
+				let htmlNode = document.querySelector('#showcase-html .showcase-result');
+				htmlNode.originalHtml = htmlNode.innerHTML;
+			</script>
+			<script class="showcase-render">
+				wrapped.replace(htmlNode);
+			</script>
+		</section>
+		<section class="showcase line-numbers" id="showcase-js">
+			<figure class="showcase-template matsui-bind"><pre class="language-js"><code>{showcase.js.template}</code></pre></figure>
+			<figure class="showcase-js matsui-bind"><pre class="language-js"><code>{showcase.js.js}</code></pre></figure>
+			<figure class="showcase-result"></figure>
+
+			<script>
+				let jsNode = document.querySelector('#showcase-js .showcase-result');
+			</script>
+			<script class="showcase-template-js">
+				let jsTemplate = Matsui.global.fromTag`
+				<h4>Hello {name}!</h4>
+				
+				<ol>
+					<li @foreach="{nested.list}">{=}</li>
+				</ol>
+				
+				<fieldset>
+					<legend>inputs</legend>
+					<label>
+						name:
+						<input $value="name">
+						<button $click="${d => d.name = ''}">clear</button>
+					</label>
+					<label>
+						slider:
+						<input type="range" min="0" max="100" $value="slider">
+						{slider} (${d => typeof d.slider})
+					</label>
+					<label>
+						check:
+						<input type="checkbox" $value="bool">
+						{bool}
+					</label>
+				</fieldset>
+				`;
+			</script>
+			<script class="showcase-render">
+				wrapped.addTo(jsNode, jsTemplate);
+			</script>
+		</section>
+
 		<script>
-			// Lets us fill out raw HTML from the description
-			Matsui.global.add('html', inner => {
-				let node = document.createElement('span');
-				return {
-					node: node,
-					updates: [data => {
-						node.innerHTML = data;
-					}]
-				};
-			});
-			Matsui.global.attributes['update'] = (node, handler) => {
-				return data => handler(node);
-			};
+			let query = document.querySelector.bind(document);
+			let queryAll = document.querySelectorAll.bind(document);
+
+			let pageUrl = location.href.replace(/#.*/, ''); // strip fragment
+			if (!/^https?\:\/\/.*\/$/.test(pageUrl)) pageUrl = "";
+
 			function unindent(text) {
 				let lines = text.split('\n').filter(x => x.trim());
+				if (!lines.length) return '';
 				let indent = '';
 				while (/\s/.test(lines[0][indent.length])) {
 					let nextIndent = indent + lines[0][indent.length];
@@ -387,259 +637,44 @@
 				}
 				return text.split('\n' + indent).join('\n').trim();
 			}
-			Matsui.global.add('prism-code', inner => {
-				let node = document.createElement('code');
-				return {
-					node: node,
-					updates: [data => {
-						node.textContent = unindent(data + "");
-						if (window.Prism) window.Prism.highlightElement(node);
-					}]
-				};
-			});
-
-			let render = Matsui.replace(document.body, {
-				groups: [
-					{
-						label: 'Overview',
-						examples: [
-							{
-								name: 'HTML templates',
-								desc: `
-									<h4>Expressions</h4>
-									<p>You can substitute properties with <code>{brackets}</code> or <code>{dot.separated.properties}</code> or function expressions with <code>\${data => ...}</code>.</p>
-									<p>Expressions within the content are rendered as sub-templates.  The fallback template shows simple types as strings.</p>
-									<h4>Attributes</h4>
-									<p>Attributes starting with <code>$</code> are handled dynamically with the same <code>{...}</code>/<code>\${...}</code> syntax.  You can give attributes special behaviour (e.g. <code>$value</code> uses the attribute value as a key if it's a plain string), or it will use the attribute value as an <strong>event handler</strong>, <strong>JS DOM property</strong> or <strong>HTML attribute</strong> (in that order of preference).</p>
-								`,
-								html: `
-									<blockquote>
-										Hello, {name}!<br>
-										HELLO \${d => d.name.toUpperCase()}!
-									</blockquote>
-
-									What's your name?<br>
-									<input $value="name">
-									<button $press="\${d => d.name = ''}">clear</button>
-								`,
-								js: `
-									Matsui.replace(node, {
-										name: 'world'
-									});
-								`
-							},
-							{
-								name: 'JS template literals (CSP-compatible)',
-								desc: `
-									<p>Since a <a href="https://content-security-policy.com/">Content Security Policy</a> can prevent dynamic JavaScript evaluation (needed to pull <code>\${...}</code> expressions out of HTML), you can move your template into a <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates">tagged template literal</a>.</p>
-									<p>This makes it easy to convert an inline HTML template into a separate one, if you enable CSP later.</p>
-								`,
-								js: `
-									let template = Matsui.global.fromTag\`
-										<blockquote>
-											Hello, {name}!<br>
-											HELLO \${d => d.name.toUpperCase()}!
-										</blockquote>
-
-										What's your name?<br>
-										<input $value="name">
-										<button $press="\${d => d.name = ''}">clear</button>
-									\`;
-
-									Matsui.replace(node, {name: 'world'}, template);
-								`
-							},
-							{
-								name: 'Named templates',
-								desc: `
-									<p>You can register a named template in JS, or by specifying <code>name="..."</code> on a <code>&lt;template></code>.</p>
-									<p>You can then specify which template to use for a given expression, by prefixing with <code>$name</code>.  You can even specify the inner templates, using a sequence like: <code>$name1$name2{expr}</code>.</p>
-								`,
-								html: `
-									<template name="hulk-says">
-										<strong class="hulk">
-											<!-- The special expression {=}
-											  refers to the current data. -->
-											{=}
-										</strong>
-									</template>
-									
-									<!-- Use our custom template, and then
-									  "uppercase" to render things inside that -->
-									$hulk-says$uppercase{message}
-								`,
-								js: `
-									// Register a template from a tagged literal
-									Matsui.global.addTag("uppercase")\`
-										\${d => d.toUpperCase()}
-									\`;
-
-									Matsui.replace(node, {
-										message: 'Hello 👋'
-									});
-								`
-							},
-							{
-								name: 'Custom JS templates',
-								desc: `
-									<p>The HTML template syntax is helpful, but you don't need to use it.  A template is any JavaScript function which accepts an "inner" template (for rendering children, if needed), and returns an object with:</p>
-									<dl>
-										<dt><code>node:</code></dt>
-										<dd>a DOM node (or <code>DocumentFragment</code>) to be inserted</dd>
-										<dt><code>updates: [...]</code></dt>
-										<dd>a list of functions taking a <code>data</code> argument and making DOM changes.</dd>
-									</dl>
-									<p>Matsui takes care of making sure the update functions are only called when the relevant data has changed.  They are always called in order, but some may be skipped.</p>
-								`,
-								js: `
-									function json(innerTemplate) {
-										let node = document.createElement('code');
-										return {
-											node: node,
-											updates: [data => {
-												node.textContent = JSON.stringify(data);
-											}]
-										};
-									}
-
-									Matsui.replace(node, {foo: 'bar'}, json);
-								`
-							},
-							{
-								name: 'Wrapped data',
-								desc: `
-									<p><code>Matsui.wrap(data)</code> returns an object which lets you make changes, or monitor/update with <a href="https://www.rfc-editor.org/rfc/rfc7386.html">merge values</a>.</p>
-									<p><code>Matsui.replace(...)</code> is a shorthand for <code>.wrap(d).replace(...)</code>.</p>
-								`,
-								html: `
-									Check me:
-									<input type="checkbox" $value="obj.checked">
-									
-									<pre id="change-list"></pre>
-								`,
-								js: `
-									let wrapped = Matsui.replace(node, {
-										foo: 'bar',
-										obj: {checked: false}
-									});
-									
-									// called when relevant (like template fns)
-									wrapped.addUpdates(data => {
-										if (data.obj.checked) {
-											// un-check it after a short delay
-											setTimeout(e => {
-												data.obj.checked = false;
-											}, 500);
-										}
-									});
-									
-									// monitor all changes, as merge objects
-									wrapped.trackMerges(merge => {
-										let line = JSON.stringify(merge) + '\\n';
-										changeList.textContent += line;
-										changeList.scrollTo(0, 1e10);
-									});
-								`,
-								elements: {changeList: '#change-list'}
-							}
-						]
-					},/*
-					{
-						label: 'Simple HTML templates',
-						examples: [
-							{
-								name: 'Value substitution',
-								desc: '<p>Enclosing a property name in <code>{brackets}</code> will replace it with that property value.</p><p>You can use <code>{dot.separated.properties}</code> to get values from inside objects.</p>',
-								html: `
-									<strong>Hello, {name}!</strong>
-								`,
-								js: `
-									Matsui.replace(node, {
-										name: 'world',
-									});
-								`,
-								elements: {'node': 'strong'}
-							},
-							{
-								name: 'Full expressions',
-								desc: '<p>You can wrap a JavaScript data-function inline in the template with <code>${...}</code>.</p><p>Any <code>&lt;script></code>s are scoped to the template, which can help keep your code clean</p>',
-								html: `
-									<strong>
-										Hello, \${d => d.name.toUpperCase()}!
-									</strong>
-								`,
-								js: `
-									Matsui.replace(node, {
-										name: 'world',
-									});
-								`
-							},
-							{
-								name: 'Generic attributes',
-								desc: `
-									<p>Any attribute prefixed with <code>$</code> is processed as a dynamic value.  By default, it will be used as:</p>
-									<ol>
-										<li>an event, if one exists (by checking for <code>on...</code>)</li>
-										<li>an object property on the JS DOM object</li>
-										<li>an HTML attribute on the element</li>
-									</ol>
-									<p>To always assign to the actual attribute, prefix with <code>$-</code> instead.  This also disables name-mangling, which is particularly useful for SVG attributes.</p>
-								`,
-								html: `
-									<button $click="\${d => d.flip = !d.flip}">toggle</button>
-									
-									<label>
-										<!-- this sets the .checked property, not the attribute -->
-										<input disabled type="checkbox" $checked="{flip}">
-										checkbox
-									</label>
-								`,
-								js: `
-									Matsui.replace(node, {
-										flip: false
-									});
-								`
-							},
-							{
-								name: 'Custom JS',
-								desc: 'the simplest way to get started'
-							}
-						]
-					}*/
-				]
-			});
-			render.data.groups[0].examples[0].selected = true;
-			render.addUpdates(data => {
-				if (Matsui.merge.getHidden(data).exampleName) {
-					data.groups.forEach(group => group.examples.forEach(example => {
-						example.selected = (example.name == data.exampleName);
-					}));
-				}
-			});
-			render.syncHash(d => ({
-				get query() {
-					if (d.linkExampleName == d.exampleName) {
-						return {example: d.exampleName};
-					}
-					d.linkExampleName = null;
-					return {};
-				},
-				set query(query) {
-					if (query.example) {
-						d.exampleName = d.linkExampleName = query.example;
-						document.querySelector('#examples').scrollIntoView();
+			
+			let commonJsPrefix = query('#showcase-common').textContent;
+			
+			let pageData = Matsui.wrap({
+				srcPrefix: `${pageUrl}release/${Matsui.version}/`,
+				showcase: {
+					html: {
+						html: '\n' + unindent(htmlNode.originalHtml).replace(/&gt;/g, '>') + '\n\n',
+						js: unindent(commonJsPrefix + query('#showcase-html script.showcase-render').textContent)
+					},
+					js: {
+						template: unindent(query('#showcase-js script.showcase-template-js').textContent),
+						js: unindent(commonJsPrefix + query('#showcase-js script.showcase-render').textContent)
 					}
 				}
-			}));
-			function linkToExample(name) {
-				render.data.linkExampleName = render.data.exampleName = name;
-			}
+			});
+			// Let the `jsTemplate` property control which template showcase is displayed
+			pageData.addUpdates(data => {
+				query('#showcase-html').style.display = data.jsTemplate ? 'none' : '';
+				query('#showcase-js').style.display = data.jsTemplate ? '' : 'none';
+				queryAll('.showcase pre').forEach(pre => {
+					if (window.Prism) Prism.plugins.lineNumbers.resize(pre);
+					pre.scrollTo(0, 0);
+				});
+			});
+
+			queryAll('.matsui-bind').forEach(node => pageData.replace(node));
 		</script>
 
 		<!-- Syntax highlighting with Prism.js -->
 		<script defer fetchpriority="low" src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js" integrity="sha512-9khQRAUBYEJDCDVP2yw3LRUQvjJ0Pjx0EShmaQjcHa6AXiOv6qHQu9lCAIR8O+/D8FtaCoJ2c0Tf9Xo7hYH01Q==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 		<script defer fetchpriority="low" src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js" integrity="sha512-SkmBfuA2hqjzEVpmnMt/LINrjop3GKWqsuLSSB3e7iBmYK7JuWw4ldmmxwD9mdm2IRTTi0OxSAfEGvgEi0i2Kw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-		<!-- Prism.js default style, but only the tokens -->
-		<style>.token.cdata,.token.comment,.token.doctype,.token.prolog{color:#708090}.token.punctuation{color:#999}.token.namespace{opacity:.7}.token.boolean,.token.constant,.token.deleted,.token.number,.token.property,.token.symbol,.token.tag{color:#905}.token.attr-name,.token.builtin,.token.char,.token.inserted,.token.selector,.token.string{color:#690}.language-css .token.string,.style .token.string,.token.entity,.token.operator,.token.url{color:#9a6e3a}.token.atrule,.token.attr-value,.token.keyword{color:#07a}.token.class-name,.token.function{color:#dd4a68}.token.important,.token.regex,.token.variable{color:#e90}.token.bold,.token.important{font-weight:700}.token.italic{font-style:italic}.token.entity{cursor:help}</style>
+		<script  defer fetchpriority="low" src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.js" integrity="sha512-BttltKXFyWnGZQcRWj6osIg7lbizJchuAMotOkdLxHxwt/Hyo+cl47bZU0QADg+Qt5DJwni3SbYGXeGMB5cBcw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+		<style>
+			@import('https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/line-numbers/prism-line-numbers.min.css');
+		</style>
+		<style>
+			.light .token.cdata,.light .token.comment,.light .token.doctype,.light .token.prolog{color:#708090}.light .token.punctuation{color:#888}.light .token.namespace{opacity:.7}.light .token.boolean,.light .token.constant,.light .token.deleted,.light .token.number,.light .token.property,.light .token.symbol,.light .token.tag{color:#905}.light .token.attr-name,.light .token.builtin,.light .token.char,.light .token.inserted,.light .token.selector,.light .token.string{color:#690}.language-css .light .token.string,.style .light .token.string,.light .token.entity,.light .token.operator,.light .token.url{color:#9a6e3a}.light .token.atrule,.light .token.attr-value,.light .token.keyword{color:#07a}.light .token.class-name,.light .token.function{color:#dd4a68}.light .token.important,.light .token.regex,.light .token.variable{color:#e90}.light .token.bold,.light .token.important{font-weight:700}.light .token.italic{font-style:italic}.light .token.entity{cursor:help}.light .token.template-punctuation{color:#460;font-weight:600}</style>
 	</body>
 </html>
