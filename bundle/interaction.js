@@ -96,12 +96,12 @@ Matsui.interaction = (attributes => {
 		}
 	};
 
-	let moveKey = attributes.moveKey = (node, handler) => {
+	let moveKeys = attributes.moveKeys = (node, handler) => {
 		addKeys(node, {
-			ArrowDown: e => handler(0, scaleDistance(15, e), node),
-			ArrowUp: e => handler(0, scaleDistance(-15, e), node),
-			ArrowLeft: e => handler(scaleDistance(-15, e), 0, node),
-			ArrowRight: e => handler(scaleDistance(15, e), 0, node),
+			ArrowDown: e => handler(0, scaleDistance(1, e), node),
+			ArrowUp: e => handler(0, scaleDistance(-1, e), node),
+			ArrowLeft: e => handler(scaleDistance(-1, e), 0, node),
+			ArrowRight: e => handler(scaleDistance(1, e), 0, node),
 			PageDown: e => handler(0, Infinity, node),
 			PageUp: e => handler(0, -Infinity, node),
 			Home: e => handler(-Infinity, 0, node),
@@ -166,8 +166,9 @@ Matsui.interaction = (attributes => {
 		node.addEventListener('pointerup', up);
 		node.addEventListener('pointercancel', up);
 		node.addEventListener('blur', up);
-		
-		moveKey(node, handler);
+
+		// keys move by 15 pixels
+		moveKeys(node, (dx, dy, node) => handler(dx*15, dy*15, node));
 	}
 
 	attributes.scroll = (node, handler) => {

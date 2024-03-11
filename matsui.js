@@ -1,5 +1,5 @@
 "use strict"
-self.Matsui = (() => {
+self.Matsui = (initFunction => {
 	if (!Object.hasOwn) {
 		Object.hasOwn = (o, p) => Object.prototype.hasOwnProperty.call(o, p);
 	}
@@ -1235,7 +1235,7 @@ self.Matsui = (() => {
 			if (!template) template = templateSet.fromElement(host);
 
 			let bindingInfo = template(templateSet.dynamic);
-			this.addUpdates(bindingInfo.updates);
+			this.addUpdates(bindingInfo.updates, true); // react to external updates
 			
 			let node = bindingInfo.node;
 			if (replace) {
@@ -1272,12 +1272,14 @@ self.Matsui = (() => {
 		wrap(data, synchronous) {
 			return new Wrapped(data, synchronous);
 		},
-		addTo: (element, data, template) => {
+		addTo(element, data, template) {
 			return api.wrap(data).addTo(element, template);
 		},
-		replace: (element, data, template) => {
+		replace(element, data, template) {
 			return api.wrap(data).replace(element, template);
 		}
 	}
+
+	if (initFunction) setTimeout(initFunction.bind(self, Matsui = api), 0);
 	return api;
-})();
+})(typeof Matsui === 'function' ? Matsui : self.Matsui);
