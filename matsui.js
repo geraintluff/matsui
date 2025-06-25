@@ -1,5 +1,11 @@
-"use strict"
-self.Matsui = (initFunction => {
+"use strict";
+(factory => {
+	if (typeof self == 'undefined' && typeof module == 'object') {
+		module.exports = factory();
+	} else {
+		self.Matsui = factory(typeof Matsui === 'function' ? Matsui : self.Matsui);
+	}
+})(initFunction => {
 	if (!Object.hasOwn) {
 		Object.hasOwn = (o, p) => Object.prototype.hasOwnProperty.call(o, p);
 	}
@@ -115,14 +121,14 @@ self.Matsui = (initFunction => {
 			let pendingMerge = noChangeSymbol, pendingMergeTimeout = null;
 			let notifyPendingMerge = () => {
 				clearTimeout(pendingMergeTimeout);
-				if (pendingMerge != noChangeSymbol) {
+				if (pendingMerge !== noChangeSymbol) {
 					let merge = pendingMerge;
 					pendingMerge = noChangeSymbol; // clear it first
 					actualUpdateFn(merge);
 				}
 			}
 			updateFn = mergeObj => {
-				if (pendingMerge != noChangeSymbol) {
+				if (pendingMerge !== noChangeSymbol) {
 					// merge the two changes, keeping nulls because they're meaningful
 					pendingMerge = merge.apply(pendingMerge, mergeObj, true);
 					return;
@@ -133,7 +139,7 @@ self.Matsui = (initFunction => {
 					clearTimeout(pendingMergeTimeout);
 					pendingMergeTimeout = setTimeout(notifyPendingMerge, 0);
 				} else if (!isRunning) {
-					while (pendingMerge != noChangeSymbol) {
+					while (pendingMerge !== noChangeSymbol) {
 						isRunning = true;
 						notifyPendingMerge();
 						isRunning = false;
@@ -145,7 +151,7 @@ self.Matsui = (initFunction => {
 				return new Proxy(data, {
 					get(obj, prop) {
 						let value = obj[prop];
-						if (prop == rawKey) return obj;
+						if (prop === rawKey) return obj;
 						// TODO: if it's a function without a .prototype (meaning it might be bound - see below) is there a way to let it run, but check for changes?  Or return a proxy function to do that when it's called (which could be later)?
 						// That could also check for `this` being the proxy, and (before triggering) call the actual function on `obj` instead, which would handle methods which complain when called on the proxy (like Date::toString())
 						if (!isObject(value)) return value;
@@ -192,14 +198,14 @@ self.Matsui = (initFunction => {
 			if (!isObject(data)) return data;
 			return new Proxy(data, {
 				get(obj, prop) {
-					if (prop == hiddenMergeKey) return mergeObj;
-					if (prop == hiddenMergePierceKey || prop == rawKey) return obj;
+					if (prop === hiddenMergeKey) return mergeObj;
+					if (prop === hiddenMergePierceKey || prop === rawKey) return obj;
 					let value = obj[prop];
 					let hasChange = isObject(mergeObj) && (prop in mergeObj);
 					return merge.addHidden(value, hasChange ? mergeObj[prop] : noChangeSymbol);
 				},
 				has(obj, prop) {
-					return (prop == hiddenMergeKey) || (prop in obj);
+					return (prop === hiddenMergeKey) || (prop in obj);
 				}
 			});
 		},
@@ -230,10 +236,10 @@ self.Matsui = (initFunction => {
 			let proxy = new Proxy(data, {
 				get(obj, prop) {
 					let value = obj[prop];
-					if (prop == rawKey) return obj;
-					if (prop == silentPierceKey) {
+					if (prop === rawKey) return obj;
+					if (prop === silentPierceKey) {
 						return obj;
-					} else if (prop == pierceKey) {
+					} else if (prop === pierceKey) {
 						trackerObj[accessedKey] = accessedKey;
 						return obj;
 					} else if (isArray && prop === 'length') {
@@ -300,7 +306,7 @@ self.Matsui = (initFunction => {
 			
 			// can't use data, because this is called post-merge
 			function didAccess(trackerObj, mergeValue) {
-				if (mergeValue == noChangeSymbol) return false;
+				if (mergeValue === noChangeSymbol) return false;
 				if (trackerObj[accessedKey]) return true;
 				if (!isObject(mergeValue) || Array.isArray(mergeValue) || mergeValue[isReplacementKey]) return true;
 				if (trackerObj[listKeysKey]) {
@@ -1282,4 +1288,4 @@ self.Matsui = (initFunction => {
 
 	if (initFunction) setTimeout(initFunction.bind(self, Matsui = api), 0);
 	return api;
-})(typeof Matsui === 'function' ? Matsui : self.Matsui);
+});
