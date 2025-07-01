@@ -413,7 +413,18 @@ Matsui.interaction = (attributes => {
 		node.addEventListener('close', e => handler(node));
 		node.addEventListener('cancel', e => handler(node));
 	};
-	
+
+	attributes.resize = (element, fn) => {
+		element.classList.add('_interaction-resize');
+		element._matsuiResize = fn;
+	};
+	window.addEventListener('resize', e => {
+		document.querySelectorAll('._interaction-resize').forEach(e => {
+			let fn = e._matsuiResize;
+			if (fn) fn(e, e.offsetWidth, e.offsetHeight);
+		});
+	});
+
 	return {
 		keys: addKeys
 	};

@@ -18,7 +18,7 @@ Matsui.makeHash = (path, query) => {
 		push:(result != fragment) && (fragment.replace(/\?.*/, '') != path)
 	};
 };
-Matsui.merge.apply(Matsui.Wrapped.prototype, {
+Object.assign(Matsui.Wrapped.prototype, {
 	syncHash(dataToSyncTarget) {
 		let wrapped = this;
 		function parseHash(historyState) {

@@ -13,6 +13,7 @@
 	let errors = [];
 
 	let isObject = data => (data && typeof data === 'object');
+	let isArray = v => (Array.isArray(v) || ArrayBuffer.isView(v) || v instanceof ArrayBuffer);
 	let makePlaceholderNode = () => document.createTextNode("");
 	function clearBetween(before, after) {
 		while (before.nextSibling && before.nextSibling != after) {
@@ -50,7 +51,7 @@
 	// Attach a hidden merge to data, which we use later to decide what to re-render
 	let hiddenMergeKey = Symbol(), hiddenMergePierceKey = Symbol();
 	let noChangeSymbol = Symbol('no change'), isReplacementKey = Symbol('replace');
-
+	
 	let merge = {
 		apply(value, mergeValue, valueIsMerge) {
 			// simple types are just overwritten
@@ -60,7 +61,7 @@
 				return mergeValue;
 			}
 			// Arrays overwrite everything
-			if (Array.isArray(mergeValue)) return mergeValue;
+			if (isArray(mergeValue)) return mergeValue;
 			
 			if (mergeValue[isReplacementKey]) {
 				if (valueIsMerge) {
@@ -92,7 +93,7 @@
 				toValue[isReplacementKey] = true;
 				return toValue;
 			}
-			if (Array.isArray(toValue)) return toValue;
+			if (isArray(toValue)) return toValue;
 
 			let mergeObj = {};
 			Object.keys(toValue).forEach(key => {
