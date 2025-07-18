@@ -756,6 +756,7 @@
 
 			/* Switches between templates, based on the filtered list */
 			this.dynamic = innerTemplate => {
+				if (parent && innerTemplate == parent.dynamic) innerTemplate = null;
 				let clearable = makeClearable();
 				
 				let currentTemplate, currentUpdates;
